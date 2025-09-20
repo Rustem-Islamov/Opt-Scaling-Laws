@@ -51,7 +51,10 @@ def create_loaders(dataset_name, n_workers, batch_size, seed=42):
     return train_loader_workers, val_loader, test_loader
 
 
-def load_data(dataset_name):
+def load_data(dataset_name,
+              horizontal_flip_p = 0,
+              random_crop_padding = 0,
+              ):
 
     if dataset_name == 'mnist':
 
@@ -62,27 +65,40 @@ def load_data(dataset_name):
 
         test_data = datasets.MNIST(root='data', train=False,
                                    download=True, transform=transform)
-    elif dataset_name == 'cifar10':
+    
+    elif dataset_name in ['cifar10', 'cifar100']:
 
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
-        transform = transforms.Compose([
+
+        if dataset_name == 'cifar10':
+
+            normalize = transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
+                                            std=[0.2471, 0.2435, 0.2616])
+        
+        else:
+
+            normalize = transforms.Normalize(mean=[0.5071, 0.4867, 0.4408],
+                                            std=[0.2675, 0.2565, 0.2761]) 
+
+
+        transform_test = transforms.Compose([
             transforms.ToTensor(),
             normalize,
         ])
 
-        train_data = datasets.CIFAR10(root='data', train=True,
-                                      download=True, transform=transform)
+        transform_train = transforms.Compose([
+            transforms.RandomHorizontalFlip(p = horizontal_flip_p),
+            transforms.RandomCrop(size = 32, padding = random_crop_padding),
+            transforms.ToTensor(),
+            normalize,
+        ])
 
-        test_data = datasets.CIFAR10(root='data', train=False,
-                                     download=True, transform=transform)
-    elif dataset_name == 'cifar100':
-        transform = transforms.ToTensor()  # add extra transforms
-        train_data = datasets.CIFAR100(root='data', train=True,
-                                       download=True, transform=transform)
+        dataset_class = datasets.CIFAR10 if dataset_name == 'cifar10' else datasets.CIFAR100
 
-        test_data = datasets.CIFAR100(root='data', train=False,
-                                      download=True, transform=transform)
+        train_data = dataset_class(root='data', train=True,
+                                    download=True, transform=transform_train)
+
+        test_data = dataset_class(root='data', train=False,
+                                    download=True, transform=transform_test)
     else:
         raise ValueError(dataset_name + ' is not known.')
 

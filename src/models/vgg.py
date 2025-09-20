@@ -4,54 +4,6 @@ import torch.nn.functional as F
 import math
 
 
-# MNIST Fully Connected Net ----------------------------------------------------
-class MNISTNet(nn.Module):
-    def __init__(self):
-        super(MNISTNet, self).__init__()
-        self.fc1 = nn.Linear(28 * 28, 256)
-        self.fc2 = nn.Linear(256, 10)
-
-    def forward(self, x):
-        # flatten image input
-        x = x.view(-1, 28 * 28)
-        x = F.tanh(self.fc1(x))
-        x = self.fc2(x)
-        return x
-
-
-class SimpleCNN(nn.Module):
-    def __init__(self):
-        super(SimpleCNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=5)
-        self.conv2 = nn.Conv2d(16, 16, kernel_size=5)
-        self.fc1 = nn.Linear(16 * 8 * 8, 10)
-
-    def forward(self, x):
-        #print(x.shape) # 64, 1, 28, 28
-        x = F.tanh(self.conv1(x))
-        #print(x.shape) # 64, 16, 24, 24
-        x = F.max_pool2d(x, 2)
-        #print(x.shape) # 64, 16, 12, 12
-        x = F.tanh(self.conv2(x))
-        #print(x.shape) # 64, 16, 8, 8
-        x = x.view(-1,16 * 8 * 8 )
-        x = self.fc1(x)
-        #print(x.shape)
-        return x
- 
-
-
-class MNISTLogReg(nn.Module):
-    def __init__(self):
-        super(MNISTLogReg, self).__init__()
-        self.fc = nn.Linear(28 * 28, 10)
-
-    def forward(self, x):
-        # flatten image input
-        x = x.view(-1, 28 * 28)
-        x = self.fc(x)
-        return x
-
 class BasicBlock(nn.Module):
     expansion = 1
 
@@ -144,12 +96,6 @@ class ResNet(nn.Module):
         out = self.linear(out)
         return out
 
-
-def mlp():
-    return MNISTNet()
-
-def cnn():
-    return SimpleCNN()
 
 def resnet18():
     return ResNet(BasicBlock, [2, 2, 2, 2])

@@ -2,8 +2,10 @@ import torch
 import numpy as np
 
 from utils import create_run, update_run, save_run, seed_everything
-from prep_data import create_loaders
-from optimizer.gen_sgd import SGDGen
+
+from src.dataloaders.prep_data import create_loaders
+from src.optimizers.gen_sgd import SGDGen
+from src.utils.utils import set_random_seed, set_worker_seed, evaluate
 
 # Ignore excessive warnings
 import logging
@@ -18,6 +20,7 @@ RUNS = 3
 
 def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers,device,
                   val_loader, test_loader, n_workers, hpo=False, scheduler=None):
+    
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     run = create_run()
@@ -28,10 +31,10 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
     test_acc = 0
     best_val_acc = 0
     ###
-    val_loss, _ = accuracy_and_loss(model, val_loader, criterion, device)  ### Computing loss before training
+    val_loss, _ = evaluate(model, val_loader, criterion, device)  ### Computing loss before training
     
     if val_loss < best_val_loss:
-            test_loss, test_acc = accuracy_and_loss(model, test_loader, criterion, device)
+            test_loss, test_acc = evaluate(model, test_loader, criterion, device)
             best_val_loss = val_loss
             
     update_run(train_loss, test_loss, test_acc, run)    
@@ -60,14 +63,14 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
 
         train_loss = running_loss/(iter_steps*n_workers)
 
-        val_loss, val_acc = accuracy_and_loss(model, val_loader, criterion, device)
+        val_loss, val_acc = evaluate(model, val_loader, criterion, device)
 
         #if val_loss < best_val_loss:
-        #    test_loss, test_acc = accuracy_and_loss(model, test_loader, criterion, device)
+        #    test_loss, test_acc = evaluate(model, test_loader, criterion, device)
         #    best_val_loss = val_loss
         
         #if val_acc > best_val_acc:
-        test_loss, test_acc = accuracy_and_loss(model, test_loader, criterion, device)
+        test_loss, test_acc = evaluate(model, test_loader, criterion, device)
         best_val_acc = val_acc
         best_val_loss = val_loss
 
@@ -83,27 +86,6 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
     wandb.finish()
 
     return best_val_loss, best_val_acc
-
-
-def accuracy_and_loss(model, loader, criterion, device):
-    correct = 0
-    total_loss = 0
-
-    model.eval()
-    for data, labels in loader:
-        data, labels = data.to(device), labels.to(device)
-        output = model(data)
-        loss = criterion(output, labels)
-        total_loss += loss.item()
-
-        #preds = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-        _, preds = torch.max(output.data, 1)
-        correct += (preds == labels).sum().item()
-
-    accuracy = 100. * correct / len(loader.dataset)
-    total_loss = total_loss / len(loader)
-
-    return total_loss, accuracy
 
 
 def tune_step_size(exp, suffix=None, schedule=None):
@@ -162,9 +144,12 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
         eps = round(tau/noise*np.sqrt(epochs*np.log(1/delta)), 2)
     
 
+
+    FIX RANDOM SEED IN CLEVER WAY
+
     wandb.init(
             # set the wandb project where this run will be logged
-            project='NeurIPS' + dataset_name+model_name,
+            project='ICLR' + dataset_name+model_name,
         
             # track hyperparameters and run metadata
             config={
@@ -201,11 +186,11 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
         #lambda1 = lambda epoch: lr * np.cos(np.pi/2 * epoch / (epochs + 1))
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.316)
         #scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
-        val_loss, val_acc = train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers,device,
-                                 val_loader, test_loader, n_workers, hpo=hpo, scheduler=scheduler)
     else:
-        val_loss, val_acc = train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers,device,
-                                 val_loader, test_loader, n_workers, hpo=hpo)
+        scheduler = None
+
+    val_loss, val_acc = train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers, device,
+                                val_loader, test_loader, n_workers, hpo=hpo, scheduler=scheduler)
                              
     return val_loss, val_acc
 

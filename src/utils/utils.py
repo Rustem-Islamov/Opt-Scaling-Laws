@@ -33,3 +33,28 @@ def set_random_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
+
+
+def evaluate(model, loader, criterion, device):
+    """
+    Compute loss and accuracy
+    """
+
+    correct = 0
+    total_loss = 0
+
+    model.eval()
+    for data, labels in loader:
+        data, labels = data.to(device), labels.to(device)
+        output = model(data)
+        loss = criterion(output, labels)
+        total_loss += loss.item()
+
+        #preds = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+        _, preds = torch.max(output.data, 1)
+        correct += (preds == labels).sum().item()
+
+    accuracy = 100. * correct / len(loader.dataset)
+    total_loss = total_loss / len(loader)
+
+    return total_loss, accuracy

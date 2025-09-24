@@ -7,9 +7,25 @@ class SGDGen(Optimizer):
         based on torch.optim.SGD implementation
     """
 
-    def __init__(self, params, lr, n_workers, momentum=0, beta=1, dampening=0, tau=None, noise=None,
-                 weight_decay=0, nesterov=False, comp=None, master_comp=None, DP=None,
-                 error_feedback=False, device='cuda:0', normalize=False):
+    def __init__(self, 
+                 params, 
+                 lr, 
+                 n_workers, 
+                 momentum=0,
+                 beta=1, 
+                 dampening=0, 
+                 tau=None,      #Clipping
+                 weight_decay=0, 
+                 nesterov=False, 
+                 comp=None, 
+                 master_comp=None, 
+                 DP=None,   #Differencial Privacy True/False parameter 
+                 noise=None,  #Differential Privacy 
+                 error_feedback='None',  
+                 device='cuda:0', 
+                 normalize=False,
+                 robbust_aggregator=None
+                 ):
         if lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -56,6 +72,7 @@ class SGDGen(Optimizer):
             print('mom:', momentum, 'beta:', beta, 'lr:', lr, 'tau:', self.tau)
 
     def __setstate__(self, state):
+        print("WARNING OPTIMZER SETSTATE")
         super(SGDGen, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('nesterov', False)
@@ -188,7 +205,6 @@ class SGDGen(Optimizer):
                     else:
                         update = clip_coef * param_state[error_name]
                         
-
                 elif self.error_feedback == "EF21":
 
                     error_name = 'error_g_' + str(w_id)

@@ -27,6 +27,7 @@ def create_loaders(dataset_name,
 
     indices = indices[n_val:]
     n = len(indices)
+
     a = int(np.floor(n / (homogenity_coef * n_workers)))
     top_ind = a * n_workers
     seq = range(a, top_ind, a)

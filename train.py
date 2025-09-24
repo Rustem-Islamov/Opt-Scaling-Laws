@@ -1,19 +1,16 @@
-import torch
+import logging
 import numpy as np
+import torch
+import wandb
 
-from utils import create_run, update_run, save_run, seed_everything
 
 from src.dataloaders.prep_data import create_loaders
 from src.optimizers.gen_sgd import SGDGen
-from src.utils.utils import set_random_seed, set_worker_seed, evaluate
+from src.utils.utils import set_random_seed, set_worker_seed, evaluate, create_run, update_run, save_run
 
 # Ignore excessive warnings
-import logging
 logging.propagate = False 
 logging.getLogger().setLevel(logging.ERROR)
-
-# WandB – Import the wandb library
-import wandb
 
 RUNS = 3
 
@@ -95,7 +92,7 @@ def tune_step_size(exp, suffix=None, schedule=None):
     best_acc_lr = 0
     
     seed = exp['seed']
-    seed_everything(seed)
+    set_random_seed(seed)
     hpo = False
     
     exp['val_losses'] = []
@@ -144,12 +141,11 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
         eps = round(tau/noise*np.sqrt(epochs*np.log(1/delta)), 2)
     
 
-
-    FIX RANDOM SEED IN CLEVER WAY
+    set_random_seed(seed)
 
     wandb.init(
             # set the wandb project where this run will be logged
-            project='ICLR' + dataset_name+model_name,
+            project='AISTATS' + dataset_name+model_name,
         
             # track hyperparameters and run metadata
             config={
@@ -171,9 +167,9 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
         )
 
     net = exp['net']
-    model = net().to(device)
+    model = net.to(device)
 
-    train_loader_workers, val_loader, test_loader = create_loaders(dataset_name, n_workers, batch_size, seed)
+    train_loader_workers, val_loader, test_loader = create_loaders(dataset_name, n_workers, batch_size)
 
     optimizer = SGDGen(model.parameters(), lr=lr, n_workers=n_workers, error_feedback=error_feedback,device=device,
                        comp=compression, momentum=momentum, beta=beta, tau=tau, noise=noise, DP=DP, weight_decay=weight_decay,
@@ -205,7 +201,7 @@ def run_tuned_exp(exp, runs=RUNS, suffix=None):
         raise ValueError("Tune step size first")
 
     seed = exp['seed']
-    seed_everything(seed)
+    set_random_seed(seed)
 
     for i in range(runs):
         print('Run {:3d}/{:3d}, Name {}:'.format(i+1, runs, suffix))

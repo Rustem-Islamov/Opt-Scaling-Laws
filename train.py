@@ -130,10 +130,13 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     model_name = exp['model_name']
     normalize = exp['normalize']
     delta = 1e-3
+
     if error_feedback == 'ANorm':
-        eps = round(1/noise*np.sqrt(epochs*np.log(1/delta)), 2)
+        print("TRAIN.PY WARNING")
+        #eps = round(1/noise*np.sqrt(epochs*np.log(1/delta)), 2)
     else:
-        eps = round(tau/noise*np.sqrt(epochs*np.log(1/delta)), 2)
+        print("TRAIN.PY WARNING")
+        #eps = round(tau/noise*np.sqrt(epochs*np.log(1/delta)), 2)
     
 
     set_random_seed(seed)
@@ -156,7 +159,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
             "lr": lr,
             "mom": momentum,
             "beta": beta,
-            "eps": eps,
+            #"eps": eps,
             "delta": delta,
             "normalize": normalize
             }

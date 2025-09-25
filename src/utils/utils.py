@@ -98,6 +98,7 @@ def read_run(file):
 
 def create_run():
     run = {'train_loss': [],
+           'train_acc': [],
            'test_loss': [],
            'test_acc': []
            }

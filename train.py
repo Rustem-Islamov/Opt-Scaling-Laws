@@ -6,7 +6,7 @@ import wandb
 
 from src.dataloaders.prep_data import create_loaders
 from src.optimizers.gen_sgd import SGDGen
-from src.utils.utils import set_random_seed, set_worker_seed, evaluate, create_run, update_run, save_run
+from src.utils.utils import set_random_seed, evaluate, create_run, update_run, save_run
 
 # Ignore excessive warnings
 logging.propagate = False 
@@ -37,8 +37,6 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
     update_run(train_loss, test_loss, test_acc, run)    
     ###
 
-    
-    
     for e in range(epochs):
         model.train()
         running_loss = 0
@@ -85,7 +83,7 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
     return best_val_loss, best_val_acc
 
 
-def tune_step_size(exp, suffix=None, schedule=None):
+def run_exp(exp, suffix=None, schedule=None):
     best_val_loss = np.inf
     best_lr = 0
     best_val_acc = 0

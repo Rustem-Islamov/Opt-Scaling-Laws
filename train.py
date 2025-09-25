@@ -97,10 +97,7 @@ def run_exp(exp, suffix=None, schedule=None):
     exp['val_accs'] = []
     for idx, lr in enumerate(exp['lrs']):
         print('Learning rate {:2.4f}:'.format(lr))
-        if schedule is not None:
-            val_loss, val_acc = run_workers(lr, exp, suffix=suffix+'lr_{}'.format(lr), hpo=hpo, schedule=schedule)
-        else:
-            val_loss, val_acc = run_workers(lr, exp, suffix=suffix+'lr_{}'.format(lr), hpo=hpo)
+        val_loss, val_acc = run_workers(lr, exp, suffix=suffix+'lr_{}'.format(lr), hpo=hpo, schedule=schedule)
         exp['val_losses'].append(val_loss)
         exp['val_accs'].append(val_acc)
         if val_loss < best_val_loss:

@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, Subset
 def create_loaders(dataset_name, 
                    n_workers, 
                    batch_size,
-                   val_ratio = 0.001,
+                   val_ratio = 0.01,
                    homogenity_coef = 2,
                    ):
 
@@ -56,8 +56,8 @@ def create_loaders(dataset_name,
 
 
 def load_data(dataset_name,
-              horizontal_flip_p = 0,
-              random_crop_padding = 0,
+              horizontal_flip_p = 0.5,
+              random_crop_padding = 4,
               ):
 
     if dataset_name == 'mnist':

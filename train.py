@@ -144,7 +144,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     wandb.init(
             # set the wandb project where this run will be logged
             project='AISTATS2026_ByzClip21SGD2M',
-            name=dataset_name + "_" + model_name + "_seed=" + str(seed) + "_lr=" + str(lr),
+            name=dataset_name + "_" + model_name + "_lr=" + str(lr) + f"_momentum={momentum}" + f"_betah={beta}" + f"_clip={tau}",
             tags=[dataset_name, model_name, f"n_workers={n_workers}", f"error_feedback={error_feedback}", f"DP={DP}_noise={noise:.2f}"],
             # track hyperparameters and run metadata
             config={
@@ -161,7 +161,8 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
             "beta": beta,
             #"eps": eps,
             "delta": delta,
-            "normalize": normalize
+            "normalize": normalize,
+            "n_workers" : n_workers,
             }
         )
 

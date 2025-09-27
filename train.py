@@ -130,44 +130,22 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     model_name = exp['model_name']
     normalize = exp['normalize']
     robust_aggregator = exp['robust_aggregator']
-    delta = 1e-3
-
-    if error_feedback == 'ANorm':
-        print("TRAIN.PY WARNING")
-        #eps = round(1/noise*np.sqrt(epochs*np.log(1/delta)), 2)
-    else:
-        print("TRAIN.PY WARNING")
-        #eps = round(tau/noise*np.sqrt(epochs*np.log(1/delta)), 2)
+    n_byzant_workers = exp['n_byzant_workers']
+    attack = exp['attack']
     
+    eps = exp['eps']
+    delta = exp['delta']    
 
     set_random_seed(seed)
 
     wandb.init(
             # set the wandb project where this run will be logged
             project='AISTATS2026_ByzClip21SGD2M',
-            name=dataset_name + "_" + model_name + "_lr=" + \
-                str(lr) + f"_momentum={momentum}" + f"_betah={beta}" + f"_clip={tau}" + \
-                    f"_agg={robust_aggregator}",
-            tags=[dataset_name, model_name, f"n_workers={n_workers}", f"error_feedback={error_feedback}", f"DP={DP}_noise={noise:.2f}"],
+            name=suffix,
+            tags=[dataset_name, model_name, f"n_workers={n_workers}", f"error_feedback={error_feedback}", f"DP={DP}_noise={noise:.2f}",
+                  str(attack)],
             # track hyperparameters and run metadata
-            config={
-            "ef":error_feedback,
-            "dataset": dataset_name,
-            "epochs": epochs,
-            "batch size": batch_size,
-            "seed":seed,
-            "tau": tau,
-            "DP": DP,
-            "noise": noise,
-            "lr": lr,
-            "mom": momentum,
-            "beta": beta,
-            #"eps": eps,
-            "delta": delta,
-            "normalize": normalize,
-            "n_workers" : n_workers,
-            "robust_aggregator" : robust_aggregator,
-            }
+            config=exp,
         )
 
     net = exp['net']
@@ -177,7 +155,8 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
 
     optimizer = SGDGen(model.parameters(), lr=lr, n_workers=n_workers, error_feedback=error_feedback,device=device,
                        comp=compression, momentum=momentum, beta=beta, tau=tau, noise=noise, DP=DP, weight_decay=weight_decay,
-                       master_comp=master_compression, normalize=normalize, robust_aggregator=robust_aggregator)
+                       master_comp=master_compression, normalize=normalize, robust_aggregator=robust_aggregator,
+                       n_byzant_workers=n_byzant_workers, attack=attack)
     
     if schedule is not None:
         #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)

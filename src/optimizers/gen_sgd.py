@@ -11,6 +11,8 @@ class SGDGen(Optimizer):
                  params, 
                  lr, 
                  n_workers,
+                 n_byzant_workers,
+                 attack,
                  momentum=0,
                  beta=1, 
                  dampening=0, 
@@ -62,6 +64,9 @@ class SGDGen(Optimizer):
             raise ValueError("For DP noise variance can't be None")
 
         self.n_workers = n_workers
+        self.n_byzant_workers = n_byzant_workers
+        self.attack = attack
+
         self.grads_received = 0
         self.n_iters = 0
 
@@ -209,10 +214,17 @@ class SGDGen(Optimizer):
                     param_state['updates'][self.grads_received - 1] += update
 
                 if self.grads_received == self.n_workers:
-                    
-                    # ADD_LINE13
                     # COMPARE AVG VS NNM + CWM
                     # BITFLIPPING
+
+                    #print(len(param_state['updates']))
+                    orig_mean = torch.stack(param_state['updates'], 1).mean()
+                    #print(orig_mean)
+
+                    param_state['updates'].extend(self.attack(param_state['updates']))
+                    #print(len(param_state['updates']))
+                    #print(torch.stack(param_state['updates'], 1).mean())
+                    #print((orig_mean * self.n_workers - orig_mean * self.n_byzant_workers) / (self.n_workers + self.n_byzant_workers))
 
                     if 'full_grad' not in param_state:
                         param_state['full_grad'] = self.robust_aggregator(param_state['updates'])

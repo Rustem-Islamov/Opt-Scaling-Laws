@@ -4,6 +4,11 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Subset
 
 
+num_classes_mapping = {
+    "cifar10" : 10,
+    "cifar100" : 100,
+}
+
 def create_loaders(dataset_name, 
                    n_workers, 
                    batch_size,
@@ -34,10 +39,18 @@ def create_loaders(dataset_name,
 
     split = np.split(indices[:top_ind], seq) #split prefix equally
 
+    num_classes = num_classes_mapping[dataset_name]
+    heterogenity_class_tracker = num_classes * [0]
+
     for idx in indices[top_ind:]:           #add heterogenity for the suffix
-        cur_cl = train_data[idx][1] % n_workers
+
+        class_idx = train_data[idx][1]
+
+        cur_cl = class_idx % n_workers + heterogenity_class_tracker[class_idx] * num_classes
+        heterogenity_class_tracker[class_idx] = (1 - heterogenity_class_tracker[class_idx])
+
         split[cur_cl] = np.append(split[cur_cl], idx)
-        
+    
     min_len = min([len(split[i]) for i in range(n_workers)])
     
     for idx in range(n_workers):

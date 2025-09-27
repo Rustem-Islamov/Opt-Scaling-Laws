@@ -3,7 +3,7 @@ Aggregators which takes in weights and gradients.
 """
 import torch
 
-from utils.logger import Logger
+#from src.utils.logger import Logger
 
 
 class _BaseAggregator(object):
@@ -13,7 +13,8 @@ class _BaseAggregator(object):
     """
 
     def __init__(self):
-        Logger.get().info("Init aggregator: " + self.__str__())
+        pass
+        #Logger.get().info("Init aggregator: " + self.__str__())
         # log_dict({"Aggregator": self.__str__(), "Type": "Setup"})
 
     def __call__(self, inputs):
@@ -30,7 +31,8 @@ class _BaseAsyncAggregator(object):
     """AsyncAggregator base object"""
 
     def __init__(self):
-        Logger.get().info("Init aggregator: " + self.__str__())
+        pass
+        #Logger.get().info("Init aggregator: " + self.__str__())
         # log_dict({"Aggregator": self.__str__(), "Type": "Setup"})
 
     def __call__(self, inputs):

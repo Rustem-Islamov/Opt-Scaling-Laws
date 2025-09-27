@@ -1,6 +1,6 @@
 import torch
 from torch.optim.optimizer import Optimizer
-
+from src.aggregators import CM, Mean
 
 class SGDGen(Optimizer):
     r"""
@@ -10,7 +10,7 @@ class SGDGen(Optimizer):
     def __init__(self, 
                  params, 
                  lr, 
-                 n_workers, 
+                 n_workers,
                  momentum=0,
                  beta=1, 
                  dampening=0, 
@@ -24,7 +24,7 @@ class SGDGen(Optimizer):
                  error_feedback='None',  
                  device='cuda:0', 
                  normalize=False,
-                 robbust_aggregator=None
+                 robust_aggregator=None,
                  ):
         if lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -64,6 +64,14 @@ class SGDGen(Optimizer):
         self.n_workers = n_workers
         self.grads_received = 0
         self.n_iters = 0
+
+        if robust_aggregator is None:
+            self.robust_aggregator = Mean()
+        elif robust_aggregator == "CWMedian":
+            self.robust_aggregator = CM()
+        else:
+            raise ValueError("Unknown robbust aggregator")    
+        
         
         for group in self.param_groups:
             momentum = group['momentum']
@@ -114,31 +122,6 @@ class SGDGen(Optimizer):
                     
                 if self.error_feedback == None:
                     grad_norm_sq += torch.sum(d_p**2)
-
-                if self.error_feedback == "ClipSGDM":
-                    error_name = 'mom_' + str(w_id)
-                    if error_name not in param_state:
-                        grad_norm_sq += momentum**2*torch.sum(d_p**2)
-                    else:
-                        param_state[error_name] = (1-momentum)*param_state[error_name_v] + momentum*d_p
-                        grad_norm_sq += torch.sum(param_state[error_name]**2)
-
-                if self.error_feedback == "EF21":
-                    error_name = 'error_g_' + str(w_id)
-                    if error_name not in param_state:
-                        grad_norm_sq += torch.sum(d_p**2)
-                    else:
-                        grad_norm_sq += torch.sum((d_p - param_state[error_name])**2)
-
-
-                if self.error_feedback == "ANorm":
-                    error_name = 'error_g_' + str(w_id)
-                    if error_name not in param_state:
-                        grad_norm_sq += torch.sum(d_p**2)
-                    else:
-                        grad_norm_sq += torch.sum((d_p - param_state[error_name])**2)
-                
-                        
                 if self.error_feedback == "EF21M":
                     error_name_g = 'error_g_' + str(w_id)
                     error_name_v = 'error_v_' + str(w_id)
@@ -170,19 +153,13 @@ class SGDGen(Optimizer):
         self.grads_received += 1
 
         for group in self.param_groups:
-            weight_decay = group['weight_decay']
             momentum = group['momentum']
             beta = group['beta']
-            dampening = group['dampening']
-            nesterov = group['nesterov']
             lr = group['lr']
 
             clip_norm = torch.sqrt(self.compute_clip_norm(w_id)) + 1e-10
 
-            if self.error_feedback == 'ANorm':
-                clip_coef = 1/(self.tau + clip_norm)
-            else:
-                clip_coef = min(1.0, self.tau / clip_norm)
+            clip_coef = min(1.0, self.tau / clip_norm)
 
             for p in group['params']:
                 if p.grad is None:
@@ -195,38 +172,7 @@ class SGDGen(Optimizer):
                 if self.error_feedback == None:
 
                     d_p = d_p * clip_coef
-                    update = d_p 
-
-                elif self.error_feedback == "ClipSGDM":
-                    error_name = 'mom_' + str(w_id)
-                    if error_name not in param_state:
-                        d_p = d_p * clip_coef
-                        update = d_p
-                    else:
-                        update = clip_coef * param_state[error_name]
-                        
-                elif self.error_feedback == "EF21":
-
-                    error_name = 'error_g_' + str(w_id)
-                    if error_name not in param_state:
-                        d_p = d_p * clip_coef
-                        param_state[error_name] = d_p
-                        update = d_p
-                        
-                    else:
-                        update = clip_coef * (d_p - param_state[error_name])
-                        param_state[error_name] += update
-
-                elif self.error_feedback == "ANorm":
-
-                    error_name = 'error_g_' + str(w_id)
-                    if error_name not in param_state:
-                        d_p = beta * clip_coef * d_p
-                        param_state[error_name] = d_p
-                        update = d_p
-                    else:
-                        update = beta * clip_coef * (d_p - param_state[error_name])
-                        param_state[error_name] += update
+                    update = d_p
 
                 elif self.error_feedback == "EF21M":
 
@@ -235,8 +181,8 @@ class SGDGen(Optimizer):
                     
                     if error_name_v not in param_state:
                         ## v_i^0 = momentum * nabla f_i(x^0)
-                        param_state[error_name_v] = momentum*d_p.clone() 
-                    
+                        param_state[error_name_v] = momentum*d_p.clone()
+
                     if error_name_g not in param_state:
                         ## d_p = clip_tau(momentum * nabla f_i(x^0)) = g_i^0
                         d_p = beta * clip_coef * (momentum * d_p) 
@@ -252,41 +198,32 @@ class SGDGen(Optimizer):
                     if self.error_feedback is None:
                         gaussian_noise = self.noise * torch.randn_like(update).to(self.device)
                         update.data += gaussian_noise
-                    if self.error_feedback == "ClipSGDM":
-                        gaussian_noise = self.noise * torch.randn_like(update).to(self.device)
-                        update.data += gaussian_noise
-                    elif self.error_feedback == 'EF21':
-                        gaussian_noise = self.noise * torch.randn_like(update).to(self.device)
-                        update.data += gaussian_noise
-                    elif self.error_feedback == 'ANorm':
-                        gaussian_noise = self.noise * torch.randn_like(update).to(self.device)
-                        update.data += beta * gaussian_noise
                     elif self.error_feedback == 'EF21M':
                         gaussian_noise = self.noise * torch.randn_like(update).to(self.device)
                         update.data += beta * gaussian_noise
 
-                if 'full_grad' not in param_state:
-                    #print('update full grad', self.n_iters, self.grads_received, w_id)
-                    param_state['full_grad'] = update / self.n_workers
+                if 'updates' not in param_state:
+                    param_state['updates'] = [0] * self.n_workers
+                    param_state['updates'][self.grads_received - 1] = update
                 else:
-                    #print('update full grad', self.n_iters, self.grads_received, w_id)
-                    param_state['full_grad'] += update / self.n_workers
+                    param_state['updates'][self.grads_received - 1] += update
 
                 if self.grads_received == self.n_workers:
-                    grad = param_state['full_grad']
+                    
+                    # ADD_LINE13
+                    # COMPARE AVG VS NNM + CWM
+                    # BITFLIPPING
 
-                    if self.error_feedback == 'ANorm':
-                        if self.normalize:
-                            upd_norm = torch.sqrt(self.compute_update_norm()) + 1e-10
-                            grad /= upd_norm 
+                    if 'full_grad' not in param_state:
+                        param_state['full_grad'] = self.robust_aggregator(param_state['updates'])
+                    else:
+                        param_state['full_grad'] += self.robust_aggregator(param_state['updates'])
+
+                    grad = param_state['full_grad']
                     
                     if self.error_feedback is None:
                         param_state['full_grad'] = torch.zeros_like(grad)
 
-                    if weight_decay != 0:
-                        grad.add(p, alpha=weight_decay)
-
-                    #p.data.add_(grad, alpha=-1)
                     p.copy_(p - lr*grad)
         
 

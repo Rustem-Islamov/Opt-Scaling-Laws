@@ -129,6 +129,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     master_compression = exp['master_compression']
     model_name = exp['model_name']
     normalize = exp['normalize']
+    robust_aggregator = exp['robust_aggregator']
     delta = 1e-3
 
     if error_feedback == 'ANorm':
@@ -144,7 +145,9 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     wandb.init(
             # set the wandb project where this run will be logged
             project='AISTATS2026_ByzClip21SGD2M',
-            name=dataset_name + "_" + model_name + "_lr=" + str(lr) + f"_momentum={momentum}" + f"_betah={beta}" + f"_clip={tau}",
+            name=dataset_name + "_" + model_name + "_lr=" + \
+                str(lr) + f"_momentum={momentum}" + f"_betah={beta}" + f"_clip={tau}" + \
+                    f"_agg={robust_aggregator}",
             tags=[dataset_name, model_name, f"n_workers={n_workers}", f"error_feedback={error_feedback}", f"DP={DP}_noise={noise:.2f}"],
             # track hyperparameters and run metadata
             config={
@@ -163,6 +166,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
             "delta": delta,
             "normalize": normalize,
             "n_workers" : n_workers,
+            "robust_aggregator" : robust_aggregator,
             }
         )
 
@@ -173,7 +177,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
 
     optimizer = SGDGen(model.parameters(), lr=lr, n_workers=n_workers, error_feedback=error_feedback,device=device,
                        comp=compression, momentum=momentum, beta=beta, tau=tau, noise=noise, DP=DP, weight_decay=weight_decay,
-                       master_comp=master_compression, normalize=normalize)
+                       master_comp=master_compression, normalize=normalize, robust_aggregator=robust_aggregator)
     
     if schedule is not None:
         #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)

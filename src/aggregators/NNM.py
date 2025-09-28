@@ -3,7 +3,12 @@ from .base import _BaseAggregator
 
 
 class NNM(_BaseAggregator):
-    def __call__(ctx, X, f):
+
+
+    def __init__(self, f):
+        self.f = f
+
+    def __call__(self, X):
         """
         Implements the forward pass of the NNM algorithm.
 
@@ -17,6 +22,7 @@ class NNM(_BaseAggregator):
             torch.Tensor: The output tensor Y of shape (n, d).
         """
         n, d = X.shape
+        f = self.f
         assert f < n / 2, "f must be less than n/2"
         
         outputs = []

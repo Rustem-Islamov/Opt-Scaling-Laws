@@ -10,6 +10,9 @@ class NNM(_BaseAggregator):
         self.f = f
         self.CM = CM()
 
+    def __str__(self):
+        return "NNM+CM"
+
     def __call__(self, X):
         """
         Implements the forward pass of the NNM algorithm.

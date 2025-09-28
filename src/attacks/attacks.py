@@ -16,7 +16,7 @@ class BitFlippingAttack(Attack):
         stacked_gradients = torch.stack(good_gradients, 1)
         avaraged_gradient = torch.mean(stacked_gradients, 1)
 
-        return self.n_byz_workers * [-avaraged_gradient]
+        return -avaraged_gradient
     
     def __str__(self):
         return "BitFlippingAttack"

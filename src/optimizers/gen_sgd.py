@@ -228,7 +228,9 @@ class SGDGen(Optimizer):
 
                     # print("raw grad len", len(param_state['raw_grads']))
 
-                    param_state['updates'][self.n_workers:] = self.attack(param_state['raw_grads'])
+                    corrupted_grad = self.attack(param_state['raw_grads'])
+                    for i in range(self.n_byzant_workers):
+                        param_state['updates'][self.n_workers + i] += beta * corrupted_grad
 
                     # print([el.mean() for el in param_state['updates']])
 

@@ -174,6 +174,11 @@ class SGDGen(Optimizer):
 
                 d_p = p.grad.data.clone()
                 
+                if 'raw_grads' not in param_state:
+                    param_state['raw_grads'] = [d_p]
+                else:
+                    param_state['raw_grads'].append(d_p)
+
                 if self.error_feedback == None:
 
                     d_p = d_p * clip_coef
@@ -208,7 +213,7 @@ class SGDGen(Optimizer):
                         update.data += beta * gaussian_noise
 
                 if 'updates' not in param_state:
-                    param_state['updates'] = [0] * self.n_workers
+                    param_state['updates'] = [0] * (self.n_workers + self.n_byzant_workers)
                     param_state['updates'][self.grads_received - 1] = update
                 else:
                     param_state['updates'][self.grads_received - 1] += update
@@ -218,10 +223,16 @@ class SGDGen(Optimizer):
                     # BITFLIPPING
 
                     #print(len(param_state['updates']))
-                    orig_mean = torch.stack(param_state['updates'], 1).mean()
+                    #orig_mean = torch.stack(param_state['updates'], 1).mean()
                     #print(orig_mean)
 
-                    param_state['updates'].extend(self.attack(param_state['updates']))
+                    # print("raw grad len", len(param_state['raw_grads']))
+
+                    param_state['updates'][self.n_workers:] = self.attack(param_state['raw_grads'])
+
+                    # print([el.mean() for el in param_state['updates']])
+
+                    param_state['raw_grads'] = []
                     #print(len(param_state['updates']))
                     #print(torch.stack(param_state['updates'], 1).mean())
                     #print((orig_mean * self.n_workers - orig_mean * self.n_byzant_workers) / (self.n_workers + self.n_byzant_workers))

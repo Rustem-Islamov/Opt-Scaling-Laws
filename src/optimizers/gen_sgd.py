@@ -1,6 +1,6 @@
 import torch
 from torch.optim.optimizer import Optimizer
-from src.aggregators import CM, Mean
+from src.aggregators import CM, Mean, NNM
 
 class SGDGen(Optimizer):
     r"""
@@ -74,6 +74,8 @@ class SGDGen(Optimizer):
             self.robust_aggregator = Mean()
         elif robust_aggregator == "CWMedian":
             self.robust_aggregator = CM()
+        elif robust_aggregator == "NNM":
+            self.robust_aggregator = NNM(f=self.n_byzant_workers)
         else:
             raise ValueError("Unknown robbust aggregator")    
         

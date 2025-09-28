@@ -1,12 +1,14 @@
 import torch
 from .base import _BaseAggregator
 
+from src.aggregators.coordinatewise_median import CM
 
 class NNM(_BaseAggregator):
 
 
     def __init__(self, f):
         self.f = f
+        self.CM = CM()
 
     def __call__(self, X):
         """
@@ -21,13 +23,15 @@ class NNM(_BaseAggregator):
         Returns:
             torch.Tensor: The output tensor Y of shape (n, d).
         """
-        n, d = X.shape
+        n = len(X)
         f = self.f
         assert f < n / 2, "f must be less than n/2"
         
         outputs = []
         neighbor_indices_list = []
 
+        orig_shape = X[0].shape
+        X = torch.stack(X).reshape(n, -1)
         for i in range(n):
             distances = torch.norm(X - X[i], p=2, dim=1)
             
@@ -35,26 +39,16 @@ class NNM(_BaseAggregator):
             nearest_neighbor_indices = sorted_indices[:n - f]
             neighbor_indices_list.append(nearest_neighbor_indices)
             
-            print(nearest_neighbor_indices)
-
             # Select the neighbor vectors using the indices
             neighbors = X[nearest_neighbor_indices]
             
             # Average the neighbors and append to the output list
-            y_i = torch.mean(neighbors, dim=0)
-            print(y_i)
+            y_i = torch.mean(neighbors, dim=0).reshape(orig_shape)
+            
             outputs.append(y_i)
 
         # Stack the results into a single tensor
-        Y = torch.stack(outputs)
         
-        # Save necessary information for the backward pass
-        # neighbor_indices_tensor = torch.stack(neighbor_indices_list)
-        # ctx.save_for_backward(neighbor_indices_tensor)
-        # ctx.n = n
-        # ctx.f = f
-        # ctx.d = d
-        
-        print(Y.shape)
-
-        return Y.mean(dim=0)
+        outputs
+ 
+        return self.CM(outputs)

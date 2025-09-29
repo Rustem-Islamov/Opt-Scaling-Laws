@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, Subset
 
 
 num_classes_mapping = {
+    "mnist" : 10,
     "cifar10" : 10,
     "cifar100" : 100,
 }
@@ -13,7 +14,7 @@ def create_loaders(dataset_name,
                    n_workers, 
                    batch_size,
                    val_ratio = 0.01,
-                   homogenity_coef = 2,
+                   homogenity_coef = 1,
                    ):
 
     train_data, test_data = load_data(dataset_name)
@@ -75,13 +76,16 @@ def load_data(dataset_name,
 
     if dataset_name == 'mnist':
 
-        transform = transforms.ToTensor()
+        transform = transforms.Compose([transforms.ToTensor(),
+                    transforms.Normalize((0.1307,), (0.3081,))])
 
         train_data = datasets.MNIST(root='data', train=True,
                                     download=True, transform=transform)
 
         test_data = datasets.MNIST(root='data', train=False,
                                    download=True, transform=transform)
+        
+        
     
     elif dataset_name in ['cifar10', 'cifar100']:
 

@@ -140,7 +140,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
 
     wandb.init(
             # set the wandb project where this run will be logged
-            project='AISTATS2026_ByzClip21SGD2M_NOAGG',
+            project='AISTATS2026_ByzClip21SGD2M_MNIST',
             name=suffix,
             tags=[dataset_name, model_name, f"n_workers={n_workers}", f"error_feedback={error_feedback}", f"DP={DP}_noise={noise:.2f}",
                   str(attack)],

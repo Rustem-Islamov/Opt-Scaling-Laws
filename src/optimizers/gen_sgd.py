@@ -221,8 +221,6 @@ class SGDGen(Optimizer):
                     param_state['updates'][self.grads_received - 1] += update
 
                 if self.grads_received == self.n_workers:
-                    # COMPARE AVG VS NNM + CWM
-                    # BITFLIPPING
 
                     #print(len(param_state['updates']))
                     #orig_mean = torch.stack(param_state['updates'], 1).mean()
@@ -230,7 +228,8 @@ class SGDGen(Optimizer):
 
                     # print("raw grad len", len(param_state['raw_grads']))
 
-                    corrupted_grad = self.attack(param_state['raw_grads'])
+                    #corrupted_grad = self.attack(param_state['raw_grads'])
+                    corrupted_grad = self.attack(param_state['updates'][:self.n_workers])
                     for i in range(self.n_byzant_workers):
                         param_state['updates'][self.n_workers + i] = corrupted_grad # as byzant can devide on betahat and kill momentum
 

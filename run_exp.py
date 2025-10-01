@@ -28,6 +28,9 @@ attack = BitFlippingAttack(n_byzant_workers)
 
 eps = 18
 
+project_name = f"ByzClip21SGD2M_MNIST_EPOCHS60_BS{bs}_NEWATTACK_{n_byzant_workers}BYZ_EPS{eps}"
+
+
 def main(args):
 
     tau = args.tau
@@ -50,7 +53,8 @@ def main(args):
                                     beta=hbeta, momentum=beta, lrs=[lrs], tau=tau, noise=DP_noise, DP=DP,
                                     master_compression=None,  weight_decay=0,
                                     robust_aggregator=agg, n_byzant_workers=n_byzant_workers,
-                                    delta=delta, eps=eps, attack=attack)
+                                    delta=delta, eps=eps, attack=attack,
+                                    project_name = project_name)
                 best_lr, best_acc_lr = run_exp(exp,
                                                 suffix=f'AISTATS2026_{method}_{model}_lr{lrs}_beta_{beta}_hbeta{hbeta}_tau{tau}_seed{seed}_eps{eps}_agg{str(agg)}_attack{str(attack)}',
                                                 schedule=sch)

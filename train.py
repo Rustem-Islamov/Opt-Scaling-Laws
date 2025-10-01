@@ -136,11 +136,13 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     eps = exp['eps']
     delta = exp['delta']    
 
+    project_name = exp['project_name']
+
     set_random_seed(seed)
 
     wandb.init(
             # set the wandb project where this run will be logged
-            project='AISTATS2026_ByzClip21SGD2M_MNIST',
+            project=project_name,
             name=suffix,
             tags=[dataset_name, model_name, f"n_workers={n_workers}", f"error_feedback={error_feedback}", f"DP={DP}_noise={noise:.2f}",
                   str(attack)],

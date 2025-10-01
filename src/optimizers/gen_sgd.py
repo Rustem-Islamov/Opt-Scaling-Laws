@@ -218,7 +218,11 @@ class SGDGen(Optimizer):
                     param_state['updates'] = [0] * (self.n_workers + self.n_byzant_workers)
                     param_state['updates'][self.grads_received - 1] = update
                 else:
-                    param_state['updates'][self.grads_received - 1] += update
+                    if self.error_feedback == 'EF21M':
+                        param_state['updates'][self.grads_received - 1] += update
+                    else:
+                        param_state['updates'][self.grads_received - 1] = update
+                    
 
                 if self.grads_received == self.n_workers:
 

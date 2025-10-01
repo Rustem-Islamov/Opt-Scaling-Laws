@@ -63,12 +63,12 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "cuda_id", 
-        type=float, 
+        type=int, 
     )
 
     parser.add_argument(
         "tau", 
-        type=int, 
+        type=float, 
     )
 
     args = parser.parse_args()

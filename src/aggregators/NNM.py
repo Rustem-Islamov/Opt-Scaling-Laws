@@ -42,16 +42,10 @@ class NNM(_BaseAggregator):
             nearest_neighbor_indices = sorted_indices[:n - f]
             neighbor_indices_list.append(nearest_neighbor_indices)
             
-            # Select the neighbor vectors using the indices
             neighbors = X[nearest_neighbor_indices]
             
-            # Average the neighbors and append to the output list
             y_i = torch.mean(neighbors, dim=0).reshape(orig_shape)
             
             outputs.append(y_i)
-
-        # Stack the results into a single tensor
-        
-        outputs
- 
+         
         return self.CM(outputs)

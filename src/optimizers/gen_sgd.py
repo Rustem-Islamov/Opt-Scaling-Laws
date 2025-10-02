@@ -129,6 +129,8 @@ class SGDGen(Optimizer):
                     
                 if self.error_feedback == None:
                     grad_norm_sq += torch.sum(d_p**2)
+                if self.error_feedback == "Safe-DSHB":
+                    grad_norm_sq += torch.sum(d_p**2)
                 if self.error_feedback == "EF21M":
                     error_name_g = 'error_g_' + str(w_id)
                     error_name_v = 'error_v_' + str(w_id)
@@ -186,6 +188,20 @@ class SGDGen(Optimizer):
                     d_p = d_p * clip_coef
                     update = d_p
 
+                elif self.error_feedback == "Safe-DSHB":
+
+                    error_name_g = 'error_g_' + str(w_id)
+                    d_p = d_p * clip_coef # compute g_i^t
+                    if self.DP:
+                        d_p += self.noise * torch.randn_like(d_p).to(self.device) # compute tilde{g}_i^t
+
+                    if error_name_g not in param_state:
+                        param_state[error_name_g] = momentum*d_p.clone() 
+                        update = param_state[error_name_g] # compute m_i^0 = momentum*tilde{g}_i^t
+                    else:
+                        param_state[error_name_g] = (1-momentum)*param_state[error_name_g] + momentum*d_p.clone() # compute m_i^t = (1-momentum)*m_i^{t-1} + momentum*tilde{g}_i^t
+                        update = param_state[error_name_g]
+
                 elif self.error_feedback == "EF21M":
 
                     error_name_g = 'error_g_' + str(w_id)
@@ -222,9 +238,10 @@ class SGDGen(Optimizer):
                         param_state['updates'][self.grads_received - 1] += update
                     else:
                         param_state['updates'][self.grads_received - 1] = update
-                    
 
                 if self.grads_received == self.n_workers:
+                    # COMPARE AVG VS NNM + CWM
+                    # BITFLIPPING
 
                     #print(len(param_state['updates']))
                     #orig_mean = torch.stack(param_state['updates'], 1).mean()
@@ -249,6 +266,8 @@ class SGDGen(Optimizer):
                     grad = param_state['full_grad']
                     
                     if self.error_feedback is None:
+                        param_state['full_grad'] = torch.zeros_like(grad)
+                    if self.error_feedback == 'Safe-DSHB':
                         param_state['full_grad'] = torch.zeros_like(grad)
 
                     p.copy_(p - lr*grad)

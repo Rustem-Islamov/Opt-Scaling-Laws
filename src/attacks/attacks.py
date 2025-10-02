@@ -6,21 +6,18 @@ class Attack():
     def __call__(self, *args, **kwds):
         pass
 
-    
+
 class BitFlippingAttack(Attack):
 
-    def __init__(self, n_byz_workers):
+    def __init__(self, n_byz_workers, scale=1):
         self.n_byz_workers = n_byz_workers
+        self.scale = scale
 
     def __call__(self, good_gradients):
         stacked_gradients = torch.stack(good_gradients, 1)
         avaraged_gradient = torch.mean(stacked_gradients, 1)
 
-        return -avaraged_gradient
-    
+        return -avaraged_gradient * self.scale
+
     def __str__(self):
         return "BitFlippingAttack"
-
-
-        
-    

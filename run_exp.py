@@ -22,7 +22,7 @@ sch = None
 DP = True
 epochs = 60
 delta = 4e-4
-seed = 228
+#seed = 228
 agg = "NNM"  # None, CWMedian
 attack = BitFlippingAttack(n_byzant_workers)
 
@@ -35,6 +35,7 @@ def main(args):
 
     tau = args.tau
     cuda_id = args.cuda_id
+    seed = args.seed
 
     for beta in [0.1]: #momentum
         for hbeta in [0.01, 0.1]:  #beta hat from paper
@@ -73,6 +74,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "tau", 
         type=float, 
+    )
+
+    parser.add_argument(
+        "seed", 
+        type=int, 
+        default=228
     )
 
     args = parser.parse_args()

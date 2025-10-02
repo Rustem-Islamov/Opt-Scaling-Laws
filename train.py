@@ -74,13 +74,15 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
         print('Epoch: {}/{}.. Training Loss: {:.5f}, Test Loss: {:.5f}, Test accuracy: {:.2f}'.format(e + 1, epochs, train_loss, test_loss, test_acc), end='\n')
         wandb.log({"epoch":e+1, "train_loss": train_loss, "test_loss": test_loss, "test_acc": test_acc})
 
+    final_test_loss, final_test_acc = evaluate(model, test_loader, criterion, device)
+
     print('')
     if not hpo:
         save_run(suffix, run)
 
     wandb.finish()
 
-    return best_val_loss, best_val_acc
+    return final_test_loss, final_test_acc
 
 
 def run_exp(exp, suffix=None, schedule=None):
@@ -170,10 +172,10 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     else:
         scheduler = None
 
-    val_loss, val_acc = train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers, device,
+    final_test_loss, final_test_acc = train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers, device,
                                 val_loader, test_loader, n_workers, hpo=hpo, scheduler=scheduler)
                              
-    return val_loss, val_acc
+    return final_test_loss, final_test_acc
 
 
 def run_tuned_exp(exp, runs=RUNS, suffix=None):

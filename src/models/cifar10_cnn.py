@@ -2,12 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class Net(nn.Module):
+class CifarNet(nn.Module):
     """
     A simple CNN model adapted for the CIFar-10 dataset (3x32x32 images).
     """
     def __init__(self):
-        super(Net, self).__init__()
+        super(CifarNet, self).__init__()
 
         self.conv1 = nn.Conv2d(3, 32, 3, 1, padding=1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1, padding=1)
@@ -35,5 +35,5 @@ class Net(nn.Module):
                 # x = self.dropout2(x)
         
         output = self.fc2(x)
-        
+
         return output

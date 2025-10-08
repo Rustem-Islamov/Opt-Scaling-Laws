@@ -20,6 +20,7 @@ class SGDGen(Optimizer):
         lr,
         n_workers,
         n_byzant_workers,
+        attack,
         batch_size,
         momentum=0.0,
         beta=1.0,
@@ -79,6 +80,7 @@ class SGDGen(Optimizer):
 
         self.n_workers = int(n_workers)
         self.n_byzant_workers = int(n_byzant_workers)
+        self.attack = attack
 
         # counts steps within a round of n_workers contributions
         self.grads_received = 0
@@ -196,40 +198,11 @@ class SGDGen(Optimizer):
                 for i in range(bs):
                     avg.add_(state[f'{w_id}_{i}_indiv_grad'], alpha=1.0/bs)
                     state.pop(f'{w_id}_{i}_indiv_grad', None)
-                p.grad.detach().copy_(avg)
-
-    @torch.no_grad()
-    def clip_indiv_grad(self, w_id: int) -> torch.Tensor:
-        """Compute and return sqrt(sum ||·||^2) (later square-rooted)."""
-        for group in self.param_groups:
-            bs = group["batch_size"] 
-            for i in range(bs):
-                grad_norm_sq = torch.tensor(0.0, device=self.device)
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    param_state = self.state[p]
-                    grad_norm_sq += torch.sum(param_state[f'{w_id}_{i}_indiv_grad']) ** 2
-
-                clip_coef = min(1.0, float(self.tau) / (float(torch.sqrt(grad_norm_sq)) + 1e-10) )
-                
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    param_state[f'{w_id}_{i}_indiv_grad'].mul(clip_coef)
-
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                param_state = self.state[p]
-                avg_clip_grad = torch.zeros_like(p, device=self.device)
-                for i in range(bs):
-                    avg_clip_grad += param_state[f'{w_id}_{i}_indiv_grad']/bs
 
                 if self.DP:
                     avg_clip_grad = self._add_dp_noise_(avg_clip_grad, scale=1.0)
+
                 p.grad.detach().copy_(avg_clip_grad)
-        return
 
     # ------------ main step ------------
 
@@ -307,14 +280,24 @@ class SGDGen(Optimizer):
                     raise ValueError(f"Unknown error_feedback mode: {self.error_feedback}")
 
                 # --- store update into per-round slot for robust aggregation ---
-                if "updates" not in param_state:
-                    # Allocate a fixed-size list for current round
-                    param_state["updates"] = [None] * self.n_workers
+                if 'updates' not in param_state:
+                    param_state['updates'] = [0] * (self.n_workers + self.n_byzant_workers)
+                    param_state['updates'][self.grads_received - 1] = update
+                else:
+                    if self.error_feedback == 'EF21M':
+                        param_state['updates'][self.grads_received - 1] += update
+                    else:
+                        param_state['updates'][self.grads_received - 1] = update
 
                 param_state["updates"][idx] = update
 
                 # When all workers have contributed: aggregate and step
                 if self.grads_received == self.n_workers:
+
+                    corrupted_grad = self.attack(param_state['updates'][:self.n_workers])
+                    for i in range(self.n_byzant_workers):
+                        param_state['updates'][self.n_workers + i] = corrupted_grad # as byzant can devide on betahat and kill momentum
+
                     full_grad = self.robust_aggregator(param_state["updates"])  # tensor same shape as p
                     # (Optional) zero out stored full_grad for EF usage; not needed here
                     # Apply update: p <- p - lr * full_grad

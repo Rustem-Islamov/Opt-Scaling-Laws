@@ -16,7 +16,8 @@ class SGDGen(Optimizer):
                  momentum=0,
                  beta=1, 
                  dampening=0, 
-                 tau=None,      #Clipping
+                 inner_tau=None,      #Clipping
+                 outer_tau=None,
                  weight_decay=0, 
                  nesterov=False, 
                  comp=None, 
@@ -37,15 +38,17 @@ class SGDGen(Optimizer):
         if weight_decay < 0.0:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
+        assert outer_tau == None
+
         defaults = dict(lr=lr, momentum=momentum, beta=beta, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov,
-                        tau=tau, noise=noise, DP=DP)
+                        tau=inner_tau, noise=noise, DP=DP)
         
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGDGen, self).__init__(params, defaults)
 
-        self.tau = tau
+        self.tau = inner_tau
         self.noise = noise
         self.device = device
         self.DP = DP
@@ -91,25 +94,6 @@ class SGDGen(Optimizer):
         super(SGDGen, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('nesterov', False)
-
-
-    @torch.no_grad()
-    def compute_update_norm(self):
-        """Computes and returns *squared* update norm."""
-        upd_norm_sq = 0.  # we assume all params are on the same device
-        for group in self.param_groups:
-            for p in group['params']:
-                
-                if p.grad is None:
-                    continue
-                    
-                param_state = self.state[p]
-
-                if self.error_feedback == "ANorm":
-                    upd_norm_sq += torch.sum(param_state['full_grad']**2)
-
-                        
-        return upd_norm_sq
     
        
     @torch.no_grad()

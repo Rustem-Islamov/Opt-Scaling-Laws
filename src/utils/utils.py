@@ -127,8 +127,10 @@ def load_exp(exp_name):
     return exp
 
 
-def create_exp(name, dataset, net, model_name, n_workers, epochs, seed, batch_size, lrs, tau, noise, DP, compression, error_feedback, criterion, device,
-               project_name, robust_aggregator, n_byzant_workers, attack, delta, eps, master_compression=None, momentum=0, beta=1, weight_decay=0, normalize=False):
+def create_exp(name, dataset, net, model_name, n_workers, epochs, seed, batch_size, lrs, inner_tau, outer_tau,
+                noise, DP, compression, error_feedback, criterion, device,
+               project_name, robust_aggregator, n_byzant_workers, attack, 
+               delta, eps, master_compression=None, momentum=0, beta=1, weight_decay=0, normalize=False):
     exp = {
         'name': name,
         'dataset_name': dataset,
@@ -139,7 +141,8 @@ def create_exp(name, dataset, net, model_name, n_workers, epochs, seed, batch_si
         'seed': seed,
         'batch_size': batch_size,
         'lrs':  lrs,
-        'tau': tau,
+        'inner_tau': inner_tau,
+        'outer_tau': outer_tau,
         'noise': noise,
         'DP': DP,
         'lr': None,

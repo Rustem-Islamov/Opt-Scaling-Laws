@@ -2,90 +2,78 @@ import torch
 from torch.optim.optimizer import Optimizer
 from src.aggregators import CM, Mean, NNM
 
-
 class SGDGen(Optimizer):
     r"""
-    Generalized SGD with (optional) clipping, DP noise, error feedback variants,
-    and robust aggregation across multiple workers.
-
-    Memory-safety improvements vs. original:
-      - Do not store unbounded per-step tensors (removed 'raw_grads').
-      - 'updates' (per-round storage) is cleared right after aggregation.
-      - Minimize clones and use in-place ops where appropriate.
+        based on torch.optim.SGD implementation
     """
 
-    def __init__(
-        self,
-        params,
-        lr,
-        n_workers,
-        n_byzant_workers,
-        attack,
-        batch_size,
-        momentum=0.0,
-        beta=1.0,
-        dampening=0.0,
-        tau=None,                 # clipping radius (required)
-        weight_decay=0.0,
-        nesterov=False,
-        comp=None,                # kept for API compatibility (unused here)
-        master_comp=None,         # kept for API compatibility (unused here)
-        DP=None,                  # Differential Privacy: bool
-        noise=None,               # DP noise std (sigma)
-        error_feedback="None",    # None | "Safe-DSHB" | "EF21M"
-        device="cuda:0",
-        normalize=False,
-        robust_aggregator=None,   # None | "CWMedian" | "NNM"  (default: Mean)
-    ):
+    def __init__(self, 
+                 params, 
+                 lr, 
+                 n_workers,
+                 n_byzant_workers,
+                 attack,
+                 batch_size,
+                 momentum=0,
+                 beta=1, 
+                 dampening=0, 
+                 inner_tau=None,      #Clipping every sample
+                 outer_tau=None,      #Clipping ef
+                 weight_decay=0, 
+                 nesterov=False, 
+                 comp=None, 
+                 master_comp=None, 
+                 DP=None,   #Differencial Privacy True/False parameter 
+                 noise=None,  #Differential Privacy 
+                 error_feedback='None',  
+                 device='cuda:0', 
+                 normalize=False,
+                 robust_aggregator=None,
+                 ):
         if lr < 0.0:
-            raise ValueError(f"Invalid learning rate: {lr}")
+            raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
-            raise ValueError(f"Invalid momentum value: {momentum}")
+            raise ValueError("Invalid momentum value: {}".format(momentum))
         if beta < 0.0:
-            raise ValueError(f"Invalid heavy-ball value beta: {beta}")
+            raise ValueError("Invalid heavy-ball value: {}".format(beta))
         if weight_decay < 0.0:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        defaults = dict(
-            lr=lr,
-            momentum=momentum,
-            beta=beta,
-            dampening=dampening,
-            weight_decay=weight_decay,
-            nesterov=nesterov,
-            batch_size=batch_size,
-            tau=tau,
-            noise=noise,
-            DP=DP,
-        )
-
+        defaults = dict(lr=lr, momentum=momentum, beta=beta, dampening=dampening,
+                        weight_decay=weight_decay, nesterov=nesterov,
+                        inner_tau=inner_tau, outer_tau=outer_tau, noise=noise, DP=DP, batch_size=batch_size)
+        
         if nesterov and (momentum <= 0 or dampening != 0):
-            raise ValueError("Nesterov momentum requires momentum > 0 and zero dampening")
+            raise ValueError("Nesterov momentum requires a momentum and zero dampening")
+        super(SGDGen, self).__init__(params, defaults)
 
-        super().__init__(params, defaults)
-
-        if tau is None:
-            raise ValueError("Clipping radius 'tau' can't be None")
-
-        if DP and noise is None:
-            raise ValueError("For DP, noise (std) must be provided")
-
-        self.tau = tau
+        self.inner_tau = inner_tau
+        self.outer_tau = outer_tau
         self.noise = noise
         self.device = device
-        self.DP = bool(DP)
+        self.DP = DP
         self.normalize = normalize
+        if error_feedback == 'None':
+            self.error_feedback = None
+        else:
+            self.error_feedback = error_feedback
+                
+        if self.inner_tau is None:
+            raise ValueError("Clipping radius can't be None")
+            
+        if self.outer_tau is None:
+            raise ValueError("Clipping radius can't be None")
 
-        self.error_feedback = None if error_feedback == "None" else error_feedback
+        if self.DP and self.noise is None:
+            raise ValueError("For DP noise variance can't be None")
 
-        self.n_workers = int(n_workers)
-        self.n_byzant_workers = int(n_byzant_workers)
+        self.n_workers = n_workers
+        self.n_byzant_workers = n_byzant_workers
         self.attack = attack
 
-        # counts steps within a round of n_workers contributions
         self.grads_received = 0
+        self.n_iters = 0
 
-        # Select robust aggregator
         if robust_aggregator is None:
             self.robust_aggregator = Mean()
         elif robust_aggregator == "CWMedian":
@@ -93,24 +81,26 @@ class SGDGen(Optimizer):
         elif robust_aggregator == "NNM":
             self.robust_aggregator = NNM(f=self.n_byzant_workers)
         else:
-            raise ValueError(f"Unknown robust aggregator: {robust_aggregator}")
-
-        # Debug banner (optional)
-        print(self.error_feedback, self.tau, self.DP, self.noise)
+            raise ValueError("Unknown robbust aggregator")    
+        
+        
         for group in self.param_groups:
-            print("mom:", group["momentum"], "beta:", group["beta"], "lr:", group["lr"], "tau:", self.tau)
+            momentum = group['momentum']
+            beta = group['beta']
+            lr = group['lr']
 
     def __setstate__(self, state):
-        print("WARNING OPTIMIZER __setstate__ (loading state)")
-        super().__setstate__(state)
+        print("WARNING OPTIMZER SETSTATE")
+        super(SGDGen, self).__setstate__(state)
         for group in self.param_groups:
-            group.setdefault("nesterov", False)
-
-    # ------------ helpers ------------
+            group.setdefault('nesterov', False)
 
     @torch.no_grad()
     def _add_dp_noise_(self, update: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
         """Optionally add DP Gaussian noise (in-place friendly)."""
+        """
+            scale = beta_hat
+        """
         if not self.DP:
             return update
         # Allocate a noise tensor, then add; letting PyTorch reuse allocator.
@@ -118,41 +108,6 @@ class SGDGen(Optimizer):
         if scale != 1.0:
             noise.mul_(scale)
         return update.add_(noise)
-
-    # Note: This function updates EF21M's v buffer in-place (original behavior),
-    # because compute_clip_norm previously had side-effects in your code.
-    @torch.no_grad()
-    def compute_clip_norm(self, w_id: int) -> torch.Tensor:
-        """Compute and return sqrt(sum ||·||^2) (later square-rooted)."""
-        grad_norm_sq = torch.tensor(0.0, device=self.device)
-        for group in self.param_groups:
-            momentum = group["momentum"]
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-                param_state = self.state[p]
-                d_p = p.grad.detach()
-
-                if self.error_feedback is None or self.error_feedback == "Safe-DSHB":
-                    grad_norm_sq += d_p.pow(2).sum() #torch.sum(d_p * d_p)
-
-                elif self.error_feedback == "EF21M":
-                    error_name_g = f"error_g_{w_id}"
-                    error_name_v = f"error_v_{w_id}"
-
-                    if error_name_g not in param_state:
-                        # momentum^2 * ||g||^2
-                        grad_norm_sq += (momentum * momentum) * d_p.pow(2).sum() #torch.sum(d_p * d_p)
-                    else:
-                        # v <- (1-m)*v + m*g  (create once, then in-place update)
-                        if error_name_v not in param_state:
-                            param_state[error_name_v] = torch.zeros_like(d_p, device=self.device)
-                        v = param_state[error_name_v]
-                        v.mul_(1 - momentum).add_(momentum, d_p)
-                        #grad_norm_sq += torch.sum((v - param_state[error_name_g]) ** 2)
-                        grad_norm_sq += (v - param_state[error_name_g]).pow(2).sum()
-        return grad_norm_sq
-
 
     @torch.no_grad()
     def clip_indiv_grad(self, w_id: int) -> None:
@@ -179,7 +134,7 @@ class SGDGen(Optimizer):
 
             # 2) Compute clipping coefficients (vectorized)
             per_ex_norm = per_ex_sqnorm.sqrt().clamp_min(1e-10)
-            clip_coef = (self.tau / per_ex_norm).clamp(max=1.0)  # shape: (bs,)
+            clip_coef = (self.inner_tau / per_ex_norm).clamp(max=1.0)  # shape: (bs,)
 
             # 3) Scale each per-parameter, per-example gradient in-place
             for p in group["params"]:
@@ -200,86 +155,109 @@ class SGDGen(Optimizer):
                     state.pop(f'{w_id}_{i}_indiv_grad', None)
 
                 if self.DP:
-                    avg_clip_grad = self._add_dp_noise_(avg_clip_grad, scale=1.0)
+                    avg = self._add_dp_noise_(avg, scale=1.0)
 
-                p.grad.detach().copy_(avg_clip_grad)
+                p.grad.detach().copy_(avg)
+    
+       
+    @torch.no_grad()
+    def compute_clip_norm(self, w_id):
 
-    # ------------ main step ------------
+        assert self.error_feedback == "EF21M"
+
+        """Computes and returns *squared* gradient norm."""
+        grad_norm_sq = 0.  # we assume all params are on the same device
+        for group in self.param_groups:
+            momentum = group['momentum']
+            for p in group['params']:
+                
+                if p.grad is None:
+                    continue
+                    
+                param_state = self.state[p]
+
+                d_p = p.grad.data.clone()
+                if self.error_feedback == "EF21M":
+                    error_name_g = 'error_g_' + str(w_id)
+                    error_name_v = 'error_v_' + str(w_id)
+                    
+                    if error_name_g not in param_state:
+                        grad_norm_sq += momentum**2*torch.sum(d_p**2)
+                    else:
+                        ## v_i^{t+1} = (1-momentum)*v_i^t + momentum * nabla f_i(x^{t+1})
+                        param_state[error_name_v] = (1-momentum)*param_state[error_name_v] + momentum*d_p
+                        ## ||v_i^{t+1} - g_i^t||^2
+                        grad_norm_sq += torch.sum((param_state[error_name_v] - param_state[error_name_g])**2)
+                    
+        return grad_norm_sq
+
 
     @torch.no_grad()
-    def step_local_global(self, w_id: int, closure=None):
-        """Collect one worker's gradients, apply robust aggregation when all workers have contributed."""
+    def step_local_global(self, w_id, closure=None):
+        """Performs a single optimization step.
+
+        Arguments:
+            w_id: integer, id of the worker
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
         loss = None
         if closure is not None:
             loss = closure()
 
         self.grads_received += 1
-        idx = self.grads_received - 1  # index into per-round updates
 
         for group in self.param_groups:
-            momentum = group["momentum"]
-            beta = group["beta"]
-            lr = group["lr"]
+            momentum = group['momentum']
+            beta = group['beta']
+            lr = group['lr']
 
-            # compute clipping coefficient
-            #clip_norm = torch.sqrt(self.compute_clip_norm(w_id)) + 1e-10
-            #clip_coef = min(1.0, float(self.tau) / float(clip_norm))
-            
-
-            for p in group["params"]:
+            for p in group['params']:
                 if p.grad is None:
                     continue
 
                 param_state = self.state[p]
-                g = p.grad.detach()  # current grad (no clone; we're in no_grad), this is overwritten averaged clipped gradient with DP noise
+
+                d_p = p.grad.data.clone()
 
 
-                # --- compute per-worker 'update' according to error feedback ---
-                if self.error_feedback is None:
-                    # plain clipped gradient
-                    # we add DP noise to the averaged clipped gradient
-                    update = g # tilde{g}_i^t
+                if self.error_feedback == None:
+                    update = d_p
 
                 elif self.error_feedback == "Safe-DSHB":
-                    name_g = f"error_g_{w_id}"
-                    if name_g not in param_state:
-                        # m_i^0 = momentum * g
-                        param_state[name_g] = g.mul(momentum)
+
+                    error_name_g = 'error_g_' + str(w_id)
+
+                    if error_name_g not in param_state:
+                        param_state[error_name_g] = momentum*d_p.clone() 
+                        update = param_state[error_name_g] # compute m_i^0 = momentum*tilde{g}_i^t
                     else:
-                        # m <- (1-m)*m + m*g
-                        m = param_state[name_g]
-                        m.mul_(1 - momentum).add_(momentum, g)
-                    update = param_state[name_g]
+                        param_state[error_name_g] = (1-momentum)*param_state[error_name_g] + momentum*d_p.clone() # compute m_i^t = (1-momentum)*m_i^{t-1} + momentum*tilde{g}_i^t
+                        update = param_state[error_name_g]
 
                 elif self.error_feedback == "EF21M":
-                    clip_norm = torch.sqrt(self.compute_clip_norm(w_id)) + 1e-10
-                    clip_coef = min(1.0, float(self.tau) / float(clip_norm))
 
-                    name_g = f"error_g_{w_id}"
-                    name_v = f"error_v_{w_id}"
+                    error_name_g = 'error_g_' + str(w_id)
+                    error_name_v = 'error_v_' + str(w_id)
+                    
+                    if error_name_v not in param_state:
+                        ## v_i^0 = momentum * nabla f_i(x^0)
+                        param_state[error_name_v] = momentum*d_p.clone()
 
-                    # init persistent buffers once
-                    if name_v not in param_state:
-                        param_state[name_v] = torch.zeros_like(g, device=self.device)
+                    if error_name_g not in param_state:
+                        ## d_p = clip_tau(momentum * nabla f_i(x^0)) = g_i^0
+                        clip_norm = torch.sqrt(self.compute_clip_norm(w_id)) + 1e-10
+                        clip_coef = min(1.0, self.outer_tau / clip_norm)
 
-                    if name_g not in param_state:
-                        # g0 = beta * clip(momentum * grad)
-                        update = g.mul(momentum * clip_coef * beta)
-                        # store a persistent copy for future deltas
-                        param_state[name_g] = update.clone()
+                        d_p = beta * clip_coef * (momentum * d_p) 
+                        param_state[error_name_g] = d_p
+                        update = d_p
+                    
                     else:
-                        v = param_state[name_v]
-                        # v <- (1-m)*v + m*grad
-                        v.mul_(1 - momentum).add_(momentum, g)
-                        # delta = beta * clip(v - g_prev)
-                        update = (v - param_state[name_g]).mul(clip_coef * beta)
-                        # g_prev <- g_prev + delta
-                        param_state[name_g].add_(update)
+                        ## g_i^{t+1} += clip_tau(v_i^{t+1} - g_i^t)
+                        update = beta * clip_coef * (param_state[error_name_v] - param_state[error_name_g]) 
+                        param_state[error_name_g] += update
 
-                else:
-                    raise ValueError(f"Unknown error_feedback mode: {self.error_feedback}")
-
-                # --- store update into per-round slot for robust aggregation ---
                 if 'updates' not in param_state:
                     param_state['updates'] = [0] * (self.n_workers + self.n_byzant_workers)
                     param_state['updates'][self.grads_received - 1] = update
@@ -289,26 +267,29 @@ class SGDGen(Optimizer):
                     else:
                         param_state['updates'][self.grads_received - 1] = update
 
-                param_state["updates"][idx] = update
-
-                # When all workers have contributed: aggregate and step
                 if self.grads_received == self.n_workers:
+                    # COMPARE AVG VS NNM + CWM
+                    # BITFLIPPING
+
+                    #print(len(param_state['updates']))
+                    #orig_mean = torch.stack(param_state['updates'], 1).mean()
+                    #print(orig_mean)
 
                     corrupted_grad = self.attack(param_state['updates'][:self.n_workers])
                     for i in range(self.n_byzant_workers):
                         param_state['updates'][self.n_workers + i] = corrupted_grad # as byzant can devide on betahat and kill momentum
 
-                    full_grad = self.robust_aggregator(param_state["updates"])  # tensor same shape as p
-                    # (Optional) zero out stored full_grad for EF usage; not needed here
-                    # Apply update: p <- p - lr * full_grad
-                    p.add_(full_grad, alpha=-lr)
+                    # print([el.mean() for el in param_state['updates']])
 
-                    # FREE per-round storage to release memory immediately
-                    param_state.pop("updates", None)
-                    # If you had set/used 'full_grad' persistently, clear it:
-                    # param_state.pop("full_grad", None)
+                    #print(len(param_state['updates']))
+                    #print(torch.stack(param_state['updates'], 1).mean())
+                    #print((orig_mean * self.n_workers - orig_mean * self.n_byzant_workers) / (self.n_workers + self.n_byzant_workers))
 
-        # reset round counter
+                    grad = self.robust_aggregator(param_state['updates'])
+                    
+                    p.copy_(p - lr*grad)
+        
+
         if self.grads_received == self.n_workers:
             self.grads_received = 0
 

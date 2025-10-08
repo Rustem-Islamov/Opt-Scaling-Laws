@@ -153,50 +153,50 @@ class SGDGen(Optimizer):
 
 
     @torch.no_grad()
-def clip_indiv_grad(self, w_id: int) -> None:
-    """
-    Per-example L2 clipping to radius self.tau, then average across the batch
-    and overwrite p.grad with the averaged, clipped gradient.
-    Expects self.state[p][f'{w_id}_{i}_indiv_grad'] to exist for i=0..bs-1.
-    """
-    for group in self.param_groups:
-        bs = group["batch_size"]
+    def clip_indiv_grad(self, w_id: int) -> None:
+        """
+        Per-example L2 clipping to radius self.tau, then average across the batch
+        and overwrite p.grad with the averaged, clipped gradient.
+        Expects self.state[p][f'{w_id}_{i}_indiv_grad'] to exist for i=0..bs-1.
+        """
+        for group in self.param_groups:
+            bs = group["batch_size"]
 
-        # 1) Compute per-example global norms: ||g^(i)||^2 = sum_p sum(g_p^(i)^2)
-        # Start with zeros on the right device/dtype
-        per_ex_sqnorm = torch.zeros(bs, device=self.device, dtype=torch.float32) # tensor of gradient norms of size (bs,)
-        for p in group["params"]:
-            if p.grad is None:
-                continue
-            state = self.state[p]
-            # Accumulate squared norms across parameters
-            # Each st[f'{w_id}_{i}_indiv_grad'] has same dtype/device as p
-            for i in range(bs):
-                gi = state[f'{w_id}_{i}_indiv_grad']
-                per_ex_sqnorm[i] += (gi * gi).sum()
+            # 1) Compute per-example global norms: ||g^(i)||^2 = sum_p sum(g_p^(i)^2)
+            # Start with zeros on the right device/dtype
+            per_ex_sqnorm = torch.zeros(bs, device=self.device, dtype=torch.float32) # tensor of gradient norms of size (bs,)
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                # Accumulate squared norms across parameters
+                # Each st[f'{w_id}_{i}_indiv_grad'] has same dtype/device as p
+                for i in range(bs):
+                    gi = state[f'{w_id}_{i}_indiv_grad']
+                    per_ex_sqnorm[i] += (gi * gi).sum()
 
-        # 2) Compute clipping coefficients (vectorized)
-        per_ex_norm = per_ex_sqnorm.sqrt().clamp_min(1e-10)
-        clip_coef = (self.tau / per_ex_norm).clamp(max=1.0)  # shape: (bs,)
+            # 2) Compute clipping coefficients (vectorized)
+            per_ex_norm = per_ex_sqnorm.sqrt().clamp_min(1e-10)
+            clip_coef = (self.tau / per_ex_norm).clamp(max=1.0)  # shape: (bs,)
 
-        # 3) Scale each per-parameter, per-example gradient in-place
-        for p in group["params"]:
-            if p.grad is None:
-                continue
-            state = self.state[p]
-            for i in range(bs):
-                state[f'{w_id}_{i}_indiv_grad'].mul_(clip_coef[i])
+            # 3) Scale each per-parameter, per-example gradient in-place
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                for i in range(bs):
+                    state[f'{w_id}_{i}_indiv_grad'].mul_(clip_coef[i])
 
-        # 4) Average across examples and overwrite p.grad
-        for p in group["params"]:
-            if p.grad is None:
-                continue
-            state = self.state[p]
-            avg = torch.zeros_like(p)
-            for i in range(bs):
-                avg.add_(state[f'{w_id}_{i}_indiv_grad'], alpha=1.0/bs)
-                state.pop(f'{w_id}_{i}_indiv_grad', None)
-            p.grad.detach().copy_(avg)
+            # 4) Average across examples and overwrite p.grad
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                avg = torch.zeros_like(p)
+                for i in range(bs):
+                    avg.add_(state[f'{w_id}_{i}_indiv_grad'], alpha=1.0/bs)
+                    state.pop(f'{w_id}_{i}_indiv_grad', None)
+                p.grad.detach().copy_(avg)
 
     @torch.no_grad()
     def clip_indiv_grad(self, w_id: int) -> torch.Tensor:
@@ -209,7 +209,7 @@ def clip_indiv_grad(self, w_id: int) -> None:
                     if p.grad is None:
                         continue
                     param_state = self.state[p]
-                    grad_norm_sq += torch.sum(param_state[f'{w_id}_{i}_indiv_grad']) ** 2)
+                    grad_norm_sq += torch.sum(param_state[f'{w_id}_{i}_indiv_grad']) ** 2
 
                 clip_coef = min(1.0, float(self.tau) / (float(torch.sqrt(grad_norm_sq)) + 1e-10) )
                 

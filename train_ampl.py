@@ -1,332 +1,241 @@
+import logging
+import numpy as np
 import torch
-from torch.optim.optimizer import Optimizer
-from src.aggregators import CM, Mean, NNM
+import wandb
 
 
-class SGDGen(Optimizer):
-    r"""
-    Generalized SGD with (optional) clipping, DP noise, error feedback variants,
-    and robust aggregation across multiple workers.
+from src.dataloaders.prep_data import create_loaders
+from src.optimizers.gen_sgd_ampl import SGDGen
+from src.utils.utils import set_random_seed, evaluate, create_run, update_run, save_run
 
-    Memory-safety improvements vs. original:
-      - Do not store unbounded per-step tensors (removed 'raw_grads').
-      - 'updates' (per-round storage) is cleared right after aggregation.
-      - Minimize clones and use in-place ops where appropriate.
-    """
+# Ignore excessive warnings
+logging.propagate = False 
+logging.getLogger().setLevel(logging.ERROR)
 
-    def __init__(
-        self,
-        params,
-        lr,
-        n_workers,
-        n_byzant_workers,
-        batch_size,
-        momentum=0.0,
-        beta=1.0,
-        dampening=0.0,
-        tau=None,                 # clipping radius (required)
-        weight_decay=0.0,
-        nesterov=False,
-        comp=None,                # kept for API compatibility (unused here)
-        master_comp=None,         # kept for API compatibility (unused here)
-        DP=None,                  # Differential Privacy: bool
-        noise=None,               # DP noise std (sigma)
-        error_feedback="None",    # None | "Safe-DSHB" | "EF21M"
-        device="cuda:0",
-        normalize=False,
-        robust_aggregator=None,   # None | "CWMedian" | "NNM"  (default: Mean)
-    ):
-        if lr < 0.0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if momentum < 0.0:
-            raise ValueError(f"Invalid momentum value: {momentum}")
-        if beta < 0.0:
-            raise ValueError(f"Invalid heavy-ball value beta: {beta}")
-        if weight_decay < 0.0:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+RUNS = 3
 
-        defaults = dict(
-            lr=lr,
-            momentum=momentum,
-            beta=beta,
-            dampening=dampening,
-            weight_decay=weight_decay,
-            nesterov=nesterov,
-            batch_size=batch_size,
-            tau=tau,
-            noise=noise,
-            DP=DP,
+
+def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers,device,
+                  val_loader, test_loader, n_workers, hpo=False, scheduler=None, clip_every_element=True):
+    
+    #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    run = create_run()
+    train_loss = np.inf
+
+    best_val_loss = np.inf
+    test_loss = np.inf
+    test_acc = 0
+    best_val_acc = 0
+    ###
+    val_loss, _ = evaluate(model, val_loader, criterion, device)  ### Computing loss before training
+    
+    if val_loss < best_val_loss:
+            test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+            best_val_loss = val_loss
+            
+    update_run(train_loss, test_loss, test_acc, run)    
+    ###
+
+    for e in range(epochs):
+        model.train()
+        running_loss = 0
+        train_loader_iter = [iter(train_loader_workers[w]) for w in range(n_workers)]
+        iter_steps = len(train_loader_workers[0])
+        for _ in range(iter_steps):
+            for w_id in range(n_workers):
+                data, labels = next(train_loader_iter[w_id])
+                data, labels = data.to(device), labels.to(device)
+                
+                if clip_every_element:
+                    
+                    batch_size = data.shape[0]
+
+                    for i in range(batch_size):
+                        data_i = data[i]
+                        labels_i = labels[i]
+                        output = model(data_i)
+                        loss = criterion(output, labels_i)
+                        loss.backward()
+
+                        for group in optimizer.param_groups:
+
+                            for p in group['params']:
+                                if p.grad is None:
+                                    continue
+
+                                param_state = optimizer.state[p]
+                                if f'{w_id}_{i}_indiv_grad' not in param_state:
+                                    param_state[f'{w_id}_{i}_indiv_grad'] = p.grad.data.clone()
+                                else:
+                                    param_state[f'{w_id}_{i}_indiv_grad'] = p.grad.data.clone()
+                        
+                        model.zero_grad()
+
+                output = model(data)
+                loss = criterion(output, labels)
+                loss.backward()
+                running_loss += loss.item()
+
+                optimizer.clip_indiv_grad(w_id) # clip all individual gradients, add DP noise and overwrite p.grad
+                optimizer.step_local_global(w_id)
+                optimizer.zero_grad()
+                
+        if scheduler is not None:
+            scheduler.step()
+            print(optimizer.param_groups[0]["lr"])
+
+        train_loss = running_loss/(iter_steps*n_workers)
+
+        val_loss, val_acc = evaluate(model, val_loader, criterion, device)
+
+        #if val_loss < best_val_loss:
+        #    test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+        #    best_val_loss = val_loss
+        
+        #if val_acc > best_val_acc:
+        test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+        best_val_acc = val_acc
+        best_val_loss = val_loss
+
+        update_run(train_loss, test_loss, test_acc, run)
+
+        print('Epoch: {}/{}.. Training Loss: {:.5f}, Test Loss: {:.5f}, Test accuracy: {:.2f}'.format(e + 1, epochs, train_loss, test_loss, test_acc), end='\n')
+        wandb.log({"epoch":e+1, "train_loss": train_loss, "test_loss": test_loss, "test_acc": test_acc})
+
+    final_test_loss, final_test_acc = evaluate(model, test_loader, criterion, device)
+
+    print('')
+    if not hpo:
+        save_run(suffix, run)
+
+    wandb.finish()
+
+    return final_test_loss, final_test_acc
+
+
+def run_exp(exp, suffix=None, schedule=None):
+    best_val_loss = np.inf
+    best_lr = 0
+    best_val_acc = 0
+    best_acc_lr = 0
+    
+    seed = exp['seed']
+    set_random_seed(seed)
+    hpo = False
+    
+    exp['val_losses'] = []
+    exp['val_accs'] = []
+    for idx, lr in enumerate(exp['lrs']):
+        print('Learning rate {:2.4f}:'.format(lr))
+        val_loss, val_acc = run_workers(lr, exp, suffix=suffix+'lr_{}'.format(lr), hpo=hpo, schedule=schedule)
+        exp['val_losses'].append(val_loss)
+        exp['val_accs'].append(val_acc)
+        if val_loss < best_val_loss:
+            best_lr = lr
+            best_val_loss = val_loss
+            
+        if val_acc > best_val_acc:
+            best_acc_lr = lr
+            best_val_acc = val_acc
+            
+    return best_lr, best_acc_lr
+
+def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
+    dataset_name = exp['dataset_name']
+    n_workers = exp['n_workers']
+    batch_size = exp['batch_size']
+    epochs = exp['epochs']
+    criterion = exp['criterion']
+    error_feedback = exp['error_feedback']
+    momentum = exp['momentum']
+    beta = exp['beta']
+    tau = exp['tau']
+    noise = exp['noise']
+    device = exp['device']
+    DP = exp['DP']
+    seed = exp['seed']
+    weight_decay = exp['weight_decay']
+    compression = get_compression(**exp['compression'])
+    master_compression = exp['master_compression']
+    model_name = exp['model_name']
+    normalize = exp['normalize']
+    robust_aggregator = exp['robust_aggregator']
+    n_byzant_workers = exp['n_byzant_workers']
+    attack = exp['attack']
+    
+    eps = exp['eps']
+    delta = exp['delta']    
+
+    project_name = exp['project_name']
+
+    set_random_seed(seed)
+
+    wandb.init(
+            # set the wandb project where this run will be logged
+            project=project_name,
+            name=suffix,
+            tags=[dataset_name, model_name, f"n_workers={n_workers}", f"error_feedback={error_feedback}", f"DP={DP}_noise={noise:.2f}",
+                  str(attack)],
+            # track hyperparameters and run metadata
+            config=exp,
         )
 
-        if nesterov and (momentum <= 0 or dampening != 0):
-            raise ValueError("Nesterov momentum requires momentum > 0 and zero dampening")
+    net = exp['net']
+    model = net.to(device)
 
-        super().__init__(params, defaults)
+    train_loader_workers, val_loader, test_loader = create_loaders(dataset_name, n_workers, batch_size)
 
-        if tau is None:
-            raise ValueError("Clipping radius 'tau' can't be None")
+    optimizer = SGDGen(model.parameters(), lr=lr, batch_size=batch_size, n_workers=n_workers, error_feedback=error_feedback,device=device,
+                       comp=compression, momentum=momentum, beta=beta, tau=tau, noise=noise, DP=DP, weight_decay=weight_decay,
+                       master_comp=master_compression, normalize=normalize, robust_aggregator=robust_aggregator,
+                       n_byzant_workers=n_byzant_workers, attack=attack)
+    
+    if schedule is not None:
+        #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)
+        #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=0)
+        #scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=lr, steps_per_epoch=2, epochs=epochs)
+        #lambda1 = lambda epoch: lr * np.cos(np.pi/2 * epoch / (epochs + 1))
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.316)
+        #scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
+    else:
+        scheduler = None
 
-        if DP and noise is None:
-            raise ValueError("For DP, noise (std) must be provided")
-
-        self.tau = tau
-        self.noise = noise
-        self.device = device
-        self.DP = bool(DP)
-        self.normalize = normalize
-
-        self.error_feedback = None if error_feedback == "None" else error_feedback
-
-        self.n_workers = int(n_workers)
-        self.n_byzant_workers = int(n_byzant_workers)
-
-        # counts steps within a round of n_workers contributions
-        self.grads_received = 0
-
-        # Select robust aggregator
-        if robust_aggregator is None:
-            self.robust_aggregator = Mean()
-        elif robust_aggregator == "CWMedian":
-            self.robust_aggregator = CM()
-        elif robust_aggregator == "NNM":
-            self.robust_aggregator = NNM(f=self.n_byzant_workers)
-        else:
-            raise ValueError(f"Unknown robust aggregator: {robust_aggregator}")
-
-        # Debug banner (optional)
-        print(self.error_feedback, self.tau, self.DP, self.noise)
-        for group in self.param_groups:
-            print("mom:", group["momentum"], "beta:", group["beta"], "lr:", group["lr"], "tau:", self.tau)
-
-    def __setstate__(self, state):
-        print("WARNING OPTIMIZER __setstate__ (loading state)")
-        super().__setstate__(state)
-        for group in self.param_groups:
-            group.setdefault("nesterov", False)
-
-    # ------------ helpers ------------
-
-    @torch.no_grad()
-    def _add_dp_noise_(self, update: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
-        """Optionally add DP Gaussian noise (in-place friendly)."""
-        if not self.DP:
-            return update
-        # Allocate a noise tensor, then add; letting PyTorch reuse allocator.
-        noise = self.noise * torch.randn_like(update, device=update.device)
-        if scale != 1.0:
-            noise.mul_(scale)
-        return update.add_(noise)
-
-    # Note: This function updates EF21M's v buffer in-place (original behavior),
-    # because compute_clip_norm previously had side-effects in your code.
-    @torch.no_grad()
-    def compute_clip_norm(self, w_id: int) -> torch.Tensor:
-        """Compute and return sqrt(sum ||·||^2) (later square-rooted)."""
-        grad_norm_sq = torch.tensor(0.0, device=self.device)
-        for group in self.param_groups:
-            momentum = group["momentum"]
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-                param_state = self.state[p]
-                d_p = p.grad.detach()
-
-                if self.error_feedback is None or self.error_feedback == "Safe-DSHB":
-                    grad_norm_sq += d_p.pow(2).sum() #torch.sum(d_p * d_p)
-
-                elif self.error_feedback == "EF21M":
-                    error_name_g = f"error_g_{w_id}"
-                    error_name_v = f"error_v_{w_id}"
-
-                    if error_name_g not in param_state:
-                        # momentum^2 * ||g||^2
-                        grad_norm_sq += (momentum * momentum) * d_p.pow(2).sum() #torch.sum(d_p * d_p)
-                    else:
-                        # v <- (1-m)*v + m*g  (create once, then in-place update)
-                        if error_name_v not in param_state:
-                            param_state[error_name_v] = torch.zeros_like(d_p, device=self.device)
-                        v = param_state[error_name_v]
-                        v.mul_(1 - momentum).add_(momentum, d_p)
-                        #grad_norm_sq += torch.sum((v - param_state[error_name_g]) ** 2)
-                        grad_norm_sq += (v - param_state[error_name_g]).pow(2).sum()
-        return grad_norm_sq
+    final_test_loss, final_test_acc = train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers, device,
+                                val_loader, test_loader, n_workers, hpo=hpo, scheduler=scheduler)
+                             
+    return final_test_loss, final_test_acc
 
 
-    @torch.no_grad()
-def clip_indiv_grad(self, w_id: int) -> None:
-    """
-    Per-example L2 clipping to radius self.tau, then average across the batch
-    and overwrite p.grad with the averaged, clipped gradient.
-    Expects self.state[p][f'{w_id}_{i}_indiv_grad'] to exist for i=0..bs-1.
-    """
-    for group in self.param_groups:
-        bs = group["batch_size"]
+def run_tuned_exp(exp, runs=RUNS, suffix=None):
+    if suffix is None:
+        suffix = exp['name']
 
-        # 1) Compute per-example global norms: ||g^(i)||^2 = sum_p sum(g_p^(i)^2)
-        # Start with zeros on the right device/dtype
-        per_ex_sqnorm = torch.zeros(bs, device=self.device, dtype=torch.float32) # tensor of gradient norms of size (bs,)
-        for p in group["params"]:
-            if p.grad is None:
-                continue
-            state = self.state[p]
-            # Accumulate squared norms across parameters
-            # Each st[f'{w_id}_{i}_indiv_grad'] has same dtype/device as p
-            for i in range(bs):
-                gi = state[f'{w_id}_{i}_indiv_grad']
-                per_ex_sqnorm[i] += (gi * gi).sum()
+    lr = exp['lr']
 
-        # 2) Compute clipping coefficients (vectorized)
-        per_ex_norm = per_ex_sqnorm.sqrt().clamp_min(1e-10)
-        clip_coef = (self.tau / per_ex_norm).clamp(max=1.0)  # shape: (bs,)
+    if lr is None:
+        raise ValueError("Tune step size first")
 
-        # 3) Scale each per-parameter, per-example gradient in-place
-        for p in group["params"]:
-            if p.grad is None:
-                continue
-            state = self.state[p]
-            for i in range(bs):
-                state[f'{w_id}_{i}_indiv_grad'].mul_(clip_coef[i])
+    seed = exp['seed']
+    set_random_seed(seed)
 
-        # 4) Average across examples and overwrite p.grad
-        for p in group["params"]:
-            if p.grad is None:
-                continue
-            state = self.state[p]
-            avg = torch.zeros_like(p)
-            for i in range(bs):
-                avg.add_(state[f'{w_id}_{i}_indiv_grad'], alpha=1.0/bs)
-                state.pop(f'{w_id}_{i}_indiv_grad', None)
-            p.grad.detach().copy_(avg)
-
-    @torch.no_grad()
-    def clip_indiv_grad(self, w_id: int) -> torch.Tensor:
-        """Compute and return sqrt(sum ||·||^2) (later square-rooted)."""
-        for group in self.param_groups:
-            bs = group["batch_size"] 
-            for i in range(bs):
-                grad_norm_sq = torch.tensor(0.0, device=self.device)
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    param_state = self.state[p]
-                    grad_norm_sq += torch.sum(param_state[f'{w_id}_{i}_indiv_grad']) ** 2)
-
-                clip_coef = min(1.0, float(self.tau) / (float(torch.sqrt(grad_norm_sq)) + 1e-10) )
-                
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    param_state[f'{w_id}_{i}_indiv_grad'].mul(clip_coef)
-
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                param_state = self.state[p]
-                avg_clip_grad = torch.zeros_like(p, device=self.device)
-                for i in range(bs):
-                    avg_clip_grad += param_state[f'{w_id}_{i}_indiv_grad']/bs
-
-                if self.DP:
-                    avg_clip_grad = self._add_dp_noise_(avg_clip_grad, scale=1.0)
-                p.grad.detach().copy_(avg_clip_grad)
-        return
-
-    # ------------ main step ------------
-
-    @torch.no_grad()
-    def step_local_global(self, w_id: int, closure=None):
-        """Collect one worker's gradients, apply robust aggregation when all workers have contributed."""
-        loss = None
-        if closure is not None:
-            loss = closure()
-
-        self.grads_received += 1
-        idx = self.grads_received - 1  # index into per-round updates
-
-        for group in self.param_groups:
-            momentum = group["momentum"]
-            beta = group["beta"]
-            lr = group["lr"]
-
-            # compute clipping coefficient
-            #clip_norm = torch.sqrt(self.compute_clip_norm(w_id)) + 1e-10
-            #clip_coef = min(1.0, float(self.tau) / float(clip_norm))
-            
-
-            for p in group["params"]:
-                if p.grad is None:
-                    continue
-
-                param_state = self.state[p]
-                g = p.grad.detach()  # current grad (no clone; we're in no_grad), this is overwritten averaged clipped gradient with DP noise
+    for i in range(runs):
+        print('Run {:3d}/{:3d}, Name {}:'.format(i+1, runs, suffix))
+        suffix_run = suffix + '_' + str(i+1)
+        run_workers(lr, exp, suffix_run)
 
 
-                # --- compute per-worker 'update' according to error feedback ---
-                if self.error_feedback is None:
-                    # plain clipped gradient
-                    # we add DP noise to the averaged clipped gradient
-                    update = g # tilde{g}_i^t
+def get_single_compression(wrapper, compression, **kwargs):
+    if wrapper:
+        return compression(**kwargs)
+    else:
+        return compression
 
-                elif self.error_feedback == "Safe-DSHB":
-                    name_g = f"error_g_{w_id}"
-                    if name_g not in param_state:
-                        # m_i^0 = momentum * g
-                        param_state[name_g] = g.mul(momentum)
-                    else:
-                        # m <- (1-m)*m + m*g
-                        m = param_state[name_g]
-                        m.mul_(1 - momentum).add_(momentum, g)
-                    update = param_state[name_g]
 
-                elif self.error_feedback == "EF21M":
-                    clip_norm = torch.sqrt(self.compute_clip_norm(w_id)) + 1e-10
-                    clip_coef = min(1.0, float(self.tau) / float(clip_norm))
-
-                    name_g = f"error_g_{w_id}"
-                    name_v = f"error_v_{w_id}"
-
-                    # init persistent buffers once
-                    if name_v not in param_state:
-                        param_state[name_v] = torch.zeros_like(g, device=self.device)
-
-                    if name_g not in param_state:
-                        # g0 = beta * clip(momentum * grad)
-                        update = g.mul(momentum * clip_coef * beta)
-                        # store a persistent copy for future deltas
-                        param_state[name_g] = update.clone()
-                    else:
-                        v = param_state[name_v]
-                        # v <- (1-m)*v + m*grad
-                        v.mul_(1 - momentum).add_(momentum, g)
-                        # delta = beta * clip(v - g_prev)
-                        update = (v - param_state[name_g]).mul(clip_coef * beta)
-                        # g_prev <- g_prev + delta
-                        param_state[name_g].add_(update)
-
-                else:
-                    raise ValueError(f"Unknown error_feedback mode: {self.error_feedback}")
-
-                # --- store update into per-round slot for robust aggregation ---
-                if "updates" not in param_state:
-                    # Allocate a fixed-size list for current round
-                    param_state["updates"] = [None] * self.n_workers
-
-                param_state["updates"][idx] = update
-
-                # When all workers have contributed: aggregate and step
-                if self.grads_received == self.n_workers:
-                    full_grad = self.robust_aggregator(param_state["updates"])  # tensor same shape as p
-                    # (Optional) zero out stored full_grad for EF usage; not needed here
-                    # Apply update: p <- p - lr * full_grad
-                    p.add_(full_grad, alpha=-lr)
-
-                    # FREE per-round storage to release memory immediately
-                    param_state.pop("updates", None)
-                    # If you had set/used 'full_grad' persistently, clear it:
-                    # param_state.pop("full_grad", None)
-
-        # reset round counter
-        if self.grads_received == self.n_workers:
-            self.grads_received = 0
-
-        return loss
+def get_compression(combine=None, **kwargs):
+    if combine is None:
+        return get_single_compression(**kwargs)
+    else:
+        compression_1 = get_single_compression(**combine['comp_1'])
+        compression_2 = get_single_compression(**combine['comp_2'])
+        return combine['func'](compression_1, compression_2)

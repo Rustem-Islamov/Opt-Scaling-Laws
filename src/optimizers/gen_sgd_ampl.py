@@ -116,6 +116,7 @@ class SGDGen(Optimizer):
         and overwrite p.grad with the averaged, clipped gradient.
         Expects self.state[p][f'{w_id}_{i}_indiv_grad'] to exist for i=0..bs-1.
         """
+
         for group in self.param_groups:
             bs = group["batch_size"]
 
@@ -123,6 +124,9 @@ class SGDGen(Optimizer):
             # Start with zeros on the right device/dtype
             per_ex_sqnorm = torch.zeros(bs, device=self.device, dtype=torch.float32) # tensor of gradient norms of size (bs,)
             for p in group["params"]:
+
+                #print("CLIP IND GRAD", self.state[p].keys())
+
                 if p.grad is None:
                     continue
                 state = self.state[p]
@@ -237,6 +241,9 @@ class SGDGen(Optimizer):
 
                 elif self.error_feedback == "EF21M":
 
+                    clip_norm = torch.sqrt(self.compute_clip_norm(w_id)) + 1e-10
+                    clip_coef = min(1.0, self.outer_tau / clip_norm)
+
                     error_name_g = 'error_g_' + str(w_id)
                     error_name_v = 'error_v_' + str(w_id)
                     
@@ -246,8 +253,6 @@ class SGDGen(Optimizer):
 
                     if error_name_g not in param_state:
                         ## d_p = clip_tau(momentum * nabla f_i(x^0)) = g_i^0
-                        clip_norm = torch.sqrt(self.compute_clip_norm(w_id)) + 1e-10
-                        clip_coef = min(1.0, self.outer_tau / clip_norm)
 
                         d_p = beta * clip_coef * (momentum * d_p) 
                         param_state[error_name_g] = d_p

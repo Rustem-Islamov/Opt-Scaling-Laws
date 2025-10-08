@@ -60,7 +60,7 @@ def create_loaders(dataset_name,
 
     b = 0
     for ind in split:
-        train_loader_workers[b] = DataLoader(Subset(train_data, ind), batch_size=batch_size, shuffle=True)
+        train_loader_workers[b] = DataLoader(Subset(train_data, ind), batch_size=batch_size, shuffle=True, drop_last=True)
         b = b + 1
 
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)

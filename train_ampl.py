@@ -52,8 +52,10 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
                     batch_size = data.shape[0]
 
                     for i in range(batch_size):
-                        data_i = data[i]
-                        labels_i = labels[i]
+
+                        data_i = data[i][None,:]
+                        labels_i = labels[i][None]
+
                         output = model(data_i)
                         loss = criterion(output, labels_i)
                         loss.backward()
@@ -65,10 +67,8 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
                                     continue
 
                                 param_state = optimizer.state[p]
-                                if f'{w_id}_{i}_indiv_grad' not in param_state:
-                                    param_state[f'{w_id}_{i}_indiv_grad'] = p.grad.data.clone()
-                                else:
-                                    param_state[f'{w_id}_{i}_indiv_grad'] = p.grad.data.clone()
+                                
+                                param_state[f'{w_id}_{i}_indiv_grad'] = p.grad.data.clone()
                         
                         model.zero_grad()
 
@@ -77,7 +77,9 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
                 loss.backward()
                 running_loss += loss.item()
 
-                optimizer.clip_indiv_grad(w_id) # clip all individual gradients, add DP noise and overwrite p.grad
+                if clip_every_element:
+                    optimizer.clip_indiv_grad(w_id) # clip all individual gradients, add DP noise and overwrite p.grad
+                
                 optimizer.step_local_global(w_id)
                 optimizer.zero_grad()
                 
@@ -150,7 +152,8 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     error_feedback = exp['error_feedback']
     momentum = exp['momentum']
     beta = exp['beta']
-    tau = exp['tau']
+    inner_tau = exp['inner_tau']
+    outer_tau = exp['outer_tau']
     noise = exp['noise']
     device = exp['device']
     DP = exp['DP']
@@ -187,7 +190,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     train_loader_workers, val_loader, test_loader = create_loaders(dataset_name, n_workers, batch_size)
 
     optimizer = SGDGen(model.parameters(), lr=lr, batch_size=batch_size, n_workers=n_workers, error_feedback=error_feedback,device=device,
-                       comp=compression, momentum=momentum, beta=beta, tau=tau, noise=noise, DP=DP, weight_decay=weight_decay,
+                       comp=compression, momentum=momentum, beta=beta, inner_tau=inner_tau, outer_tau=outer_tau, noise=noise, DP=DP, weight_decay=weight_decay,
                        master_comp=master_compression, normalize=normalize, robust_aggregator=robust_aggregator,
                        n_byzant_workers=n_byzant_workers, attack=attack)
     

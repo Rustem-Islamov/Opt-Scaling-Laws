@@ -9,7 +9,7 @@ class Attack():
 
 class BitFlippingAttack(Attack):
 
-    def __init__(self, n_byz_workers, scale=1):
+    def __init__(self, n_byz_workers, scale=10):
         self.n_byz_workers = n_byz_workers
         self.scale = scale
 

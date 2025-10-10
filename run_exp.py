@@ -82,8 +82,8 @@ if __name__ == "__main__":
         description=""
     )
 
-    parser.add_argument("device", type=str)
-    parser.add_argument("tau", type=float, help="clipping")
+    parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--tau", type=float, help="clipping", default=1e-5)
     
     parser.add_argument("--model", type=str, default='cnn_mnist', choices=['cnn_mnist', 'cnn_cifar'], help="name of architecture for logging")
     parser.add_argument("--dataset_name", type=str, default='mnist', choices=['cifar10', 'mnist'], help="dataset")

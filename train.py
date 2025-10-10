@@ -1,24 +1,15 @@
-import logging
+#import logging
 import numpy as np
 import torch
 import wandb
-
 
 from src.dataloaders.prep_data import create_loaders
 from src.optimizers.gen_sgd import SGDGen
 from src.utils.utils import set_random_seed, evaluate, create_run, update_run, save_run
 
-# Ignore excessive warnings
-logging.propagate = False 
-logging.getLogger().setLevel(logging.ERROR)
-
-RUNS = 3
-
-
 def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_workers,device,
                   val_loader, test_loader, n_workers, hpo=False, scheduler=None):
     
-    #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     run = create_run()
     train_loss = np.inf
@@ -60,11 +51,6 @@ def train_workers(suffix, model, optimizer, criterion, epochs, train_loader_work
 
         val_loss, val_acc = evaluate(model, val_loader, criterion, device)
 
-        #if val_loss < best_val_loss:
-        #    test_loss, test_acc = evaluate(model, test_loader, criterion, device)
-        #    best_val_loss = val_loss
-        
-        #if val_acc > best_val_acc:
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
         best_val_acc = val_acc
         best_val_loss = val_loss
@@ -121,7 +107,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     error_feedback = exp['error_feedback']
     momentum = exp['momentum']
     beta = exp['beta']
-    tau = exp['tau']
+    tau = exp['inner_tau']
     noise = exp['noise']
     device = exp['device']
     DP = exp['DP']
@@ -158,7 +144,7 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
     train_loader_workers, val_loader, test_loader = create_loaders(dataset_name, n_workers, batch_size)
 
     optimizer = SGDGen(model.parameters(), lr=lr, n_workers=n_workers, error_feedback=error_feedback,device=device,
-                       comp=compression, momentum=momentum, beta=beta, tau=tau, noise=noise, DP=DP, weight_decay=weight_decay,
+                       comp=compression, momentum=momentum, beta=beta, inner_tau=tau, outer_tau=None, noise=noise, DP=DP, weight_decay=weight_decay,
                        master_comp=master_compression, normalize=normalize, robust_aggregator=robust_aggregator,
                        n_byzant_workers=n_byzant_workers, attack=attack)
     
@@ -176,24 +162,6 @@ def run_workers(lr, exp, suffix=None, hpo=False, schedule=None):
                                 val_loader, test_loader, n_workers, hpo=hpo, scheduler=scheduler)
                              
     return final_test_loss, final_test_acc
-
-
-def run_tuned_exp(exp, runs=RUNS, suffix=None):
-    if suffix is None:
-        suffix = exp['name']
-
-    lr = exp['lr']
-
-    if lr is None:
-        raise ValueError("Tune step size first")
-
-    seed = exp['seed']
-    set_random_seed(seed)
-
-    for i in range(runs):
-        print('Run {:3d}/{:3d}, Name {}:'.format(i+1, runs, suffix))
-        suffix_run = suffix + '_' + str(i+1)
-        run_workers(lr, exp, suffix_run)
 
 
 def get_single_compression(wrapper, compression, **kwargs):

@@ -1,41 +1,24 @@
-# ByzClip21-SGD2M
+# Modded NanoGPT
 
-## Installation
+This code builds on [modded-nanogpt](https://github.com/KellerJordan/modded-nanogpt/).
 
-
-0. (Optional) Create and activate new environment using [`conda`](https://conda.io/projects/conda/en/latest/user-guide/getting-started.html) or `venv` ([`+pyenv`](https://github.com/pyenv/pyenv)).
-
-   a. `conda` version:
-
-   ```bash
-   # create env
-   conda create -n project_env python=PYTHON_VERSION
-
-   # activate env
-   conda activate project_env
-   ```
-
-   b. `venv` (`+pyenv`) version:
-
-   ```bash
-   # create env
-   ~/.pyenv/versions/PYTHON_VERSION/bin/python3 -m venv project_env
-
-   # alternatively, using default python version
-   python3 -m venv project_env
-
-   # activate env
-   source project_env
-   ```
-
-1. Install all required packages
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## Running experiment
+## Setup
 
 ```bash
-python run_exp.py --dataset_name=mnist --eps=8 --lr=1 --tau=1e-5
+pip install -r requirements.txt
+pip install -r data/requirements.txt
+pip install torch --index-url https://download.pytorch.org/whl/cu124 --upgrade
+python data/cached_fineweb10B.py 8 # downloads only the first 800M training tokens to save time
 ```
+
+## Run
+
+```bash
+torchrun --standalone --nproc_per_node=4 train_gpt_scion.py
+torchrun --standalone --nproc_per_node=4 train_gpt_scionlight.py
+```
+
+Notes: 
+
+- `ScionLight` has necessary changes tagged with "ScionLight modification" (specifically, don't zero gradients and be careful with gradient accumulation)
+- When changing `n_embd`, remember to change `n_head` accordingly to `n_embd // 128` to maintain head dimension of 128.

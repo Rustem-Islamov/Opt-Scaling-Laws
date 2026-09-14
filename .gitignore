@@ -118,3 +118,11 @@ err/
 sbatch.sh
 
 src/temp
+
+# Local training logs and editor artifacts
+logs/
+*_train_logs/
+.git/logs/
+.DS_Store
+*.swp
+Miniconda3-latest-Linux-x86_64.sh
